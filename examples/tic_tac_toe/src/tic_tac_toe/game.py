@@ -6,16 +6,19 @@ class Player(Enum):
 	X = "X"
 	O = "O"
 
+	def opponent(self) -> "Player":
+		return Player.O if self == Player.X else Player.X
 
-@dataclass(slots=True)
+
+@dataclass
 class State:
 	board: list[Player | None]
-	current_player: Player = Player.X
+	current_player: Player
 	winner: Player | None = None
 	move_count: int = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass
 class Undo:
 	previous_player: Player
 	previous_winner: Player | None
@@ -35,19 +38,23 @@ class TicTacToe:
 	)
 
 	def initial_state(self) -> State:
-		return State(board=[None] * 9)
+		return State(
+			board=[None] * 9,
+			current_player=Player.X,
+		)
 
 	def current_player(self, state: State) -> Player:
 		return state.current_player
 
-	def legal_moves(self, state: State) -> tuple[int, ...]:
+	def legal_moves(self, state: State) -> list[int]:
 		if self.is_terminal(state):
-			return ()
+			return []
 
-		return tuple(
-			i for i, cell in enumerate(state.board)
+		return [
+			index
+			for index, cell in enumerate(state.board)
 			if cell is None
-		)
+		]
 
 	def make_move(self, state: State, move: int) -> Undo:
 		if move not in self.legal_moves(state):
@@ -61,17 +68,25 @@ class TicTacToe:
 
 		state.board[move] = state.current_player
 		state.move_count += 1
+
 		state.winner = self._find_winner(state)
 
-		state.current_player = (
-			Player.O if state.current_player == Player.X else Player.X
-		)
+		if state.winner is None:
+			state.current_player = state.current_player.opponent()
 
 		return undo
 
-	def unmake_move(self, state: State, move: int, undo: Undo) -> None:
-		if not 0 <= move < 9 or state.board[move] is None:
-			raise ValueError(f"Cannot undo move: {move}")
+	def unmake_move(
+		self,
+		state: State,
+		move: int,
+		undo: Undo,
+	) -> None:
+		if not 0 <= move < 9:
+			raise ValueError(f"Invalid move: {move}")
+
+		if state.board[move] is None:
+			raise ValueError(f"No move to undo at position: {move}")
 
 		state.board[move] = None
 		state.current_player = undo.previous_player
@@ -79,12 +94,12 @@ class TicTacToe:
 		state.move_count = undo.previous_move_count
 
 	def is_terminal(self, state: State) -> bool:
-		return state.winner is not None or state.move_count == 9
+		return (
+			state.winner is not None
+			or state.move_count == 9
+		)
 
 	def terminal_score(self, state: State, player: Player) -> float:
-		if not self.is_terminal(state):
-			raise ValueError("Position is not terminal")
-
 		if state.winner is None:
 			return 0.0
 
