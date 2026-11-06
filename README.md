@@ -51,7 +51,8 @@ tree-forge/
 From the project root:
 
 ```bash
-pip install -e .
+pip install -e ".[test]"
+pip install -e ./examples/tic_tac_toe
 ```
 
 ## Examples
