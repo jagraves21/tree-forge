@@ -1,4 +1,8 @@
-from .interfaces import Evaluator, Game, MoveOrdering
+from .interfaces import (
+	Evaluator,
+	Game,
+	MoveOrdering
+)
 
 from .models import (
 	SearchAlgorithm,

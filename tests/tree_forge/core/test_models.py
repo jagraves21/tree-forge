@@ -3,7 +3,7 @@ from threading import Event
 
 import pytest
 
-from tree_forge.models import (
+from tree_forge.core.models import (
 	SearchAlgorithm,
 	SearchConfig,
 	SearchLimits,

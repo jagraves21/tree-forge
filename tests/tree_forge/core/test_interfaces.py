@@ -1,6 +1,6 @@
 import pytest
 
-from tree_forge.interfaces import (
+from tree_forge.core.interfaces import (
 	Evaluator,
 	Game,
 	MoveOrdering,
