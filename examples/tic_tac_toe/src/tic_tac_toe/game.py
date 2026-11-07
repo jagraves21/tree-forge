@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TypeAlias
 
-from tree_forge.interfaces import Game
+from tree_forge import Game
 
 
 BOARD_SIZE = 3
