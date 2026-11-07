@@ -1,22 +1,30 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "tree-forge"
 version = "0.1.0"
 description = "A general-purpose game search framework."
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
 test = [
-	"pytest>=8.0"
+	"pytest",
+]
+
+notebooks = [
+	"jupyter",
+	"matplotlib",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["tree_forge*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src", "examples/tic_tac_toe/src"]
 
