@@ -1,15 +1,18 @@
-from tic_tac_toe.game import (
+from .game import (
+	BOARD_SIZE,
+	GameState,
+	Move,
 	Player,
-	State,
-	TicTacToe,
-	Undo,
+	TicTacToeGame,
+	UndoData,
 )
 
-
 __all__ = [
+	"BOARD_SIZE",
+	"GameState",
+	"Move",
 	"Player",
-	"State",
-	"TicTacToe",
-	"Undo",
+	"TicTacToeGame",
+	"UndoData",
 ]
 
