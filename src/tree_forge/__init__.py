@@ -10,7 +10,10 @@ from .core import (
 	SearchTerminationReason,
 )
 
-from .algorithms import Minimax
+from .algorithms import (
+	RandomSearch,
+	Minimax,
+)
 
 __all__ = [
 	"Evaluator",
@@ -23,5 +26,6 @@ __all__ = [
 	"SearchStatistics",
 	"SearchTerminationReason",
 	
+	"RandomSearch",
 	"Minimax",
 ]

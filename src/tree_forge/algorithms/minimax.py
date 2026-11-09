@@ -21,17 +21,19 @@ UndoT = TypeVar("UndoT")
 
 
 class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
-	"""Exhaustive Minimax search for a two-player zero-sum game."""
+	"""Minimax search with optional alpha-beta pruning."""
 
 	def __init__(
 		self,
 		game: Game[StateT, MoveT, PlayerT, UndoT],
 		evaluator: Evaluator[StateT, PlayerT] | None = None,
 		limits: SearchLimits | None = None,
+		alpha_beta: bool = False,
 	) -> None:
 		self.game = game
 		self.evaluator = evaluator
 		self.limits = limits or SearchLimits()
+		self.alpha_beta = alpha_beta
 
 	def search(self, state: StateT) -> SearchResult[MoveT]:
 		"""Find the best move for the current player."""
@@ -49,6 +51,8 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 		def minimax(
 			depth: int | None,
 			ply: int,
+			alpha: float,
+			beta: float,
 		) -> float:
 			statistics.nodes_visited += 1
 			statistics.completed_depth = max(
@@ -91,6 +95,8 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 					score = minimax(
 						next_depth,
 						ply + 1,
+						alpha,
+						beta,
 					)
 				finally:
 					self.game.unmake_move(
@@ -101,8 +107,18 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 
 				if maximizing:
 					best_score = max(best_score, score)
+
+					if self.alpha_beta:
+						alpha = max(alpha, best_score)
 				else:
 					best_score = min(best_score, score)
+
+					if self.alpha_beta:
+						beta = min(beta, best_score)
+
+				if self.alpha_beta and alpha >= beta:
+					statistics.cutoffs += 1
+					break
 
 			return best_score
 
@@ -147,6 +163,8 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 
 		best_move: MoveT | None = None
 		best_score = -inf
+		alpha = -inf
+		beta = inf
 
 		depth = self.limits.max_depth
 		child_depth = depth - 1 if depth is not None else None
@@ -158,6 +176,8 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 				score = minimax(
 					child_depth,
 					1,
+					alpha,
+					beta,
 				)
 			finally:
 				self.game.unmake_move(
@@ -169,6 +189,9 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 			if best_move is None or score > best_score:
 				best_move = move
 				best_score = score
+
+			if self.alpha_beta:
+				alpha = max(alpha, best_score)
 
 		statistics.elapsed_time_seconds = (
 			perf_counter() - start_time
