@@ -45,8 +45,8 @@ class GameState:
 	def __str__(self) -> str:
 		"""Return a human-readable representation of the board."""
 		symbols = {
-			"X": "✘",
-			"O": "◯",
+			"X": "X", #"✘",
+			"O": "O", #"◯",
 		}
 
 		lines = [
