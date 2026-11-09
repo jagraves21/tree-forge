@@ -41,27 +41,40 @@ class GameState:
 		]
 	)
 	current_player: Player = Player.X
-
+	
 	def __str__(self) -> str:
 		"""Return a human-readable representation of the board."""
+		symbols = {
+			"X": "✘",
+			"O": "◯",
+		}
+
 		lines = [
 			"    0   1   2",
-			"  +---+---+---+",
+			"  ┌───┬───┬───┐",
 		]
 
 		for row_index, row in enumerate(self.board):
 			cells = [
-				cell.name if cell is not None else " "
+				symbols.get(cell.name, cell.name) if cell is not None else " "
 				for cell in row
 			]
 
 			lines.append(
-				f"{row_index} | {' | '.join(cells)} |"
+				f"{row_index} │ {' │ '.join(cells)} │"
 			)
-			lines.append("  +---+---+---+")
 
-		lines.append(f"Current player: {self.current_player.name}")
+			if row_index < len(self.board) - 1:
+				lines.append("  ├───┼───┼───┤")
 
+		lines.append("  └───┴───┴───┘")
+		
+		current_player = symbols.get(
+			self.current_player.name,
+			self.current_player.name,
+		)
+		lines.append(f"Current player: {current_player}")
+		
 		return "\n".join(lines)
 
 
