@@ -4,6 +4,7 @@ from threading import Event
 import pytest
 
 from tree_forge.core.models import (
+	CanonicalPosition,
 	SearchAlgorithm,
 	SearchConfig,
 	SearchLimits,
@@ -11,6 +12,59 @@ from tree_forge.core.models import (
 	SearchStatistics,
 	SearchTerminationReason,
 )
+
+
+class TestCanonicalPosition:
+	def test_canonical_position_stores_key(self):
+		position = CanonicalPosition[int](
+			key="canonical-key",
+			to_canonical_move=lambda move: move,
+			from_canonical_move=lambda move: move,
+		)
+
+		assert position.key == "canonical-key"
+
+	def test_to_canonical_move(self):
+		position = CanonicalPosition[int](
+			key="canonical-key",
+			to_canonical_move=lambda move: move + 1,
+			from_canonical_move=lambda move: move - 1,
+		)
+
+		assert position.to_canonical_move(5) == 6
+
+	def test_from_canonical_move(self):
+		position = CanonicalPosition[int](
+			key="canonical-key",
+			to_canonical_move=lambda move: move + 1,
+			from_canonical_move=lambda move: move - 1,
+		)
+
+		assert position.from_canonical_move(6) == 5
+
+	def test_move_transformations_are_reversible(self):
+		position = CanonicalPosition[int](
+			key="canonical-key",
+			to_canonical_move=lambda move: -move,
+			from_canonical_move=lambda move: -move,
+		)
+
+		move = 5
+
+		canonical_move = position.to_canonical_move(move)
+		original_move = position.from_canonical_move(canonical_move)
+
+		assert original_move == move
+
+	def test_canonical_position_is_immutable(self):
+		position = CanonicalPosition[int](
+			key="canonical-key",
+			to_canonical_move=lambda move: move,
+			from_canonical_move=lambda move: move,
+		)
+
+		with pytest.raises(FrozenInstanceError):
+			position.key = "another-key"
 
 
 class TestSearchAlgorithm:

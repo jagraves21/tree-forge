@@ -1,6 +1,7 @@
 import pytest
 
 from tree_forge.core.interfaces import (
+	Canonicalizer,
 	Evaluator,
 	Game,
 	MoveOrdering,
@@ -38,8 +39,16 @@ class DummyGame(Game[list[int], int, str, int]):
 	def terminal_score(self, state: list[int], player: str) -> float:
 		return 1.0 if player == "X" else -1.0
 
-	def position_hash(self, state: list[int]) -> int:
-		return hash((tuple(state), self.current_player(state)))
+
+class DummyCanonicalizer(Canonicalizer[list[int], int]):
+	"""Minimal concrete canonicalizer implementation."""
+
+	def position_key(self, state: list[int]) -> tuple:
+		return tuple(state), "X"
+
+
+class CanonicalizerWithoutPositionKey(Canonicalizer[list[int], int]):
+	"""Canonicalizer that does not implement position_key."""
 
 
 class DummyEvaluator(Evaluator[list[int], str]):
@@ -125,16 +134,72 @@ class TestGameInterface:
 		assert game.terminal_score(state, "X") == 1.0
 		assert game.terminal_score(state, "O") == -1.0
 
-	def test_position_hash(self):
-		game = DummyGame()
 
-		assert game.position_hash([1, 2]) == hash(((1, 2), "X"))
-		assert game.position_hash([1, 2]) == game.position_hash([1, 2])
+class TestCanonicalizerInterface:
+	def test_canonicalizer_is_abstract(self):
+		with pytest.raises(TypeError):
+			Canonicalizer()
+
+	def test_canonicalizer_requires_position_key(self):
+		with pytest.raises(TypeError):
+			CanonicalizerWithoutPositionKey()
+
+	def test_concrete_canonicalizer_can_be_instantiated(self):
+		canonicalizer = DummyCanonicalizer()
+
+		assert isinstance(canonicalizer, Canonicalizer)
+
+	def test_position_key(self):
+		canonicalizer = DummyCanonicalizer()
+
+		assert canonicalizer.position_key([1, 2]) == ((1, 2), "X")
+
+	def test_position_hash(self):
+		canonicalizer = DummyCanonicalizer()
+
+		assert canonicalizer.position_hash([1, 2]) == hash(((1, 2), "X"))
+		assert canonicalizer.position_hash([1, 2]) == (
+			canonicalizer.position_hash([1, 2])
+		)
 
 	def test_position_hash_changes_with_position(self):
-		game = DummyGame()
+		canonicalizer = DummyCanonicalizer()
 
-		assert game.position_hash([1, 2]) != game.position_hash([1, 3])
+		assert canonicalizer.position_hash([1, 2]) != (
+			canonicalizer.position_hash([1, 3])
+		)
+
+	def test_canonical_position_key_defaults_to_position_key(self):
+		canonicalizer = DummyCanonicalizer()
+		state = [1, 2]
+
+		assert canonicalizer.canonical_position_key(state) == (
+			canonicalizer.position_key(state)
+		)
+
+	def test_canonical_position_hash(self):
+		canonicalizer = DummyCanonicalizer()
+		state = [1, 2]
+
+		assert canonicalizer.canonical_position_hash(state) == hash(
+			canonicalizer.canonical_position_key(state)
+		)
+
+	def test_canonicalize_defaults_to_identity(self):
+		canonicalizer = DummyCanonicalizer()
+		state = [1, 2]
+		position = canonicalizer.canonicalize(state)
+
+		assert position.key == canonicalizer.canonical_position_key(state)
+
+	def test_default_move_transformations_are_identity(self):
+		canonicalizer = DummyCanonicalizer()
+		position = canonicalizer.canonicalize([1, 2])
+
+		move = 3
+
+		assert position.to_canonical_move(move) == move
+		assert position.from_canonical_move(move) == move
 
 
 class TestEvaluatorInterface:
