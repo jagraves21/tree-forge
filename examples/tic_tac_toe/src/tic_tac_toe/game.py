@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TypeAlias
 
 from tree_forge import Game
 
@@ -41,12 +41,12 @@ class GameState:
 		]
 	)
 	current_player: Player = Player.X
-	
+
 	def __str__(self) -> str:
 		"""Return a human-readable representation of the board."""
 		symbols = {
-			"X": "X", #"✘",
-			"O": "O", #"◯",
+			"X": "X",
+			"O": "O",
 		}
 
 		lines = [
@@ -68,13 +68,13 @@ class GameState:
 				lines.append("  ├───┼───┼───┤")
 
 		lines.append("  └───┴───┴───┘")
-		
+
 		current_player = symbols.get(
 			self.current_player.name,
 			self.current_player.name,
 		)
 		lines.append(f"Current player: {current_player}")
-		
+
 		return "\n".join(lines)
 
 
@@ -185,48 +185,16 @@ class TicTacToeGame(
 
 		return 1.0 if winner is player else -1.0
 
-	def position_hash(self, state: GameState) -> int:
-		"""Return a collision-free integer encoding of the position.
-
-		Each board cell is encoded using three possible values:
-			0: empty
-			1: X
-			2: O
-
-		The current player is encoded separately.
-
-		This encoding uniquely identifies every possible board
-		configuration and side-to-move combination.
-		"""
-		board_code = 0
-		multiplier = 1
-
-		for row in state.board:
-			for cell in row:
-				value = 0 if cell is None else cell.value
-
-				board_code += value * multiplier
-				multiplier *= 3
-
-		player_code = 0 if state.current_player is Player.X else 1
-
-		return board_code * 2 + player_code
-
 	def winner(self, state: GameState) -> Player | None:
 		"""Return the winning player, or None if there is no winner."""
 		board = state.board
 
 		lines = (
-			# Rows
 			*(board[row] for row in range(BOARD_SIZE)),
-
-			# Columns
 			*(
 				[board[row][column] for row in range(BOARD_SIZE)]
 				for column in range(BOARD_SIZE)
 			),
-
-			# Diagonals
 			[board[i][i] for i in range(BOARD_SIZE)],
 			[
 				board[i][BOARD_SIZE - 1 - i]
@@ -237,14 +205,11 @@ class TicTacToeGame(
 		for line in lines:
 			first = line[0]
 
-			if first is not None and all(
-				cell is first for cell in line
-			):
+			if first is not None and all(cell is first for cell in line):
 				return first
 
 		return None
 
-	
 	def display(self, state: GameState) -> None:
 		"""Print a human-readable representation of the board."""
 		print(state)

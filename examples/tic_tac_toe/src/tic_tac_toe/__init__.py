@@ -7,6 +7,9 @@ from .game import (
 	UndoData,
 )
 
+from .canonicalizer import TicTacToeCanonicalizer
+
+
 __all__ = [
 	"BOARD_SIZE",
 	"GameState",
@@ -14,5 +17,7 @@ __all__ = [
 	"Player",
 	"TicTacToeGame",
 	"UndoData",
+
+	"TicTacToeCanonicalizer",
 ]
 
