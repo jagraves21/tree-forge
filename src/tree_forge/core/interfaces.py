@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Generic, Hashable, TypeVar
 
+from .models import CanonicalPosition
+
 
 StateT = TypeVar("StateT")
 MoveT = TypeVar("MoveT")
@@ -45,12 +47,7 @@ class Game(ABC, Generic[StateT, MoveT, PlayerT, UndoT]):
 		raise NotImplementedError
 
 	@abstractmethod
-	def unmake_move(
-		self,
-		state: StateT,
-		move: MoveT,
-		undo_data: UndoT,
-	) -> None:
+	def unmake_move(self, state: StateT, move: MoveT, undo_data: UndoT) -> None:
 		"""Restore the state to exactly what it was before make_move()."""
 		raise NotImplementedError
 
@@ -60,27 +57,13 @@ class Game(ABC, Generic[StateT, MoveT, PlayerT, UndoT]):
 		raise NotImplementedError
 
 	@abstractmethod
-	def terminal_score(
-		self,
-		state: StateT,
-		player: PlayerT,
-	) -> float:
+	def terminal_score(self, state: StateT, player: PlayerT) -> float:
 		"""Return the terminal score from the specified player's perspective.
 
 		Positive scores indicate a win, negative scores indicate a loss,
 		and zero indicates a draw.
 
 		Scores must be zero-sum between the two players.
-		"""
-		raise NotImplementedError
-
-	@abstractmethod
-	def position_hash(self, state: StateT) -> int:
-		"""Return a hash identifying the complete game position.
-
-		The hash must account for all state information relevant to
-		future legal moves and position evaluation, including whose
-		turn it is.
 		"""
 		raise NotImplementedError
 
@@ -117,4 +100,73 @@ class MoveOrdering(ABC, Generic[StateT, MoveT, PlayerT]):
 		Implementations must not add illegal moves or omit legal moves.
 		"""
 		raise NotImplementedError
+
+
+class Canonicalizer(ABC, Generic[StateT, MoveT]):
+	"""Interface for identifying and canonicalizing game positions.
+
+	Canonicalization is optional. The default implementations use
+	the exact position without applying any symmetries.
+
+	Implementations may override canonical_position_key() and
+	canonicalize() to identify equivalent positions under supported
+	game-specific symmetries.
+	"""
+
+	@abstractmethod
+	def position_key(self, state: StateT) -> Hashable:
+		"""Return a representation of the exact game position.
+
+		The key must account for all state information relevant to
+		future legal moves and position evaluation, including whose
+		turn it is.
+
+		Positions that differ in any relevant state information must
+		produce different keys.
+		"""
+		raise NotImplementedError
+
+	def position_hash(self, state: StateT) -> int:
+		"""Return a hash of the exact game position.
+
+		By default, this hashes the value returned by position_key().
+		"""
+		return hash(self.position_key(state))
+
+	def canonical_position_key(self, state: StateT) -> Hashable:
+		"""Return the canonical key of a game position.
+
+		Equivalent positions under supported symmetries must produce
+		the same key.
+
+		The default implementation returns the exact position key,
+		without applying any symmetries.
+		"""
+		return self.position_key(state)
+
+	def canonical_position_hash(self, state: StateT) -> int:
+		"""Return a hash of the canonical game position.
+
+		By default, this hashes the value returned by
+		canonical_position_key().
+		"""
+		return hash(self.canonical_position_key(state))
+
+	def canonicalize(self, state: StateT) -> CanonicalPosition[MoveT]:
+		"""Return the canonical position and its move transformations.
+
+		The returned key identifies the canonical position.
+		to_canonical_move() converts moves from the original position
+		to canonical coordinates.
+		from_canonical_move() converts moves from canonical coordinates
+		back to the original position.
+
+		The default implementation uses the exact position key and
+		identity move transformations, without applying symmetries.
+		"""
+		return CanonicalPosition(
+			key=self.canonical_position_key(state),
+			to_canonical_move=lambda move: move,
+			from_canonical_move=lambda move: move,
+		)
 

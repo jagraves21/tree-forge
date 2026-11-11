@@ -1,4 +1,6 @@
 from .core import (
+	CanonicalPosition,
+	Canonicalizer,
 	Evaluator,
 	Game,
 	MoveOrdering,
@@ -15,7 +17,10 @@ from .algorithms import (
 	Minimax,
 )
 
+
 __all__ = [
+	"CanonicalPosition",
+	"Canonicalizer",
 	"Evaluator",
 	"Game",
 	"MoveOrdering",

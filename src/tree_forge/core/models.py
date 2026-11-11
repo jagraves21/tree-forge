@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from threading import Event
@@ -7,6 +8,31 @@ from typing import Generic, TypeVar
 
 
 MoveT = TypeVar("MoveT")
+
+
+@dataclass(frozen=True, slots=True)
+class CanonicalPosition(Generic[MoveT]):
+	"""Canonical representation of a game position.
+
+	The key identifies positions that are equivalent under the
+	game's supported symmetries.
+
+	The move transformations convert moves between the original
+	position's coordinates and the canonical position's coordinates:
+
+	- to_canonical_move converts an original-position move to
+	  canonical coordinates.
+	- from_canonical_move converts a canonical move back to
+	  original-position coordinates.
+
+	When no symmetries are supported, both transformations are
+	identity transformations.
+	"""
+
+	key: Hashable
+
+	to_canonical_move: Callable[[MoveT], MoveT]
+	from_canonical_move: Callable[[MoveT], MoveT]
 
 
 class SearchAlgorithm(Enum):

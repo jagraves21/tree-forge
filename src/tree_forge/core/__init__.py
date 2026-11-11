@@ -1,10 +1,12 @@
 from .interfaces import (
 	Evaluator,
 	Game,
-	MoveOrdering
+	MoveOrdering,
+	Canonicalizer,
 )
 
 from .models import (
+	CanonicalPosition,
 	SearchAlgorithm,
 	SearchConfig,
 	SearchLimits,
@@ -13,11 +15,14 @@ from .models import (
 	SearchTerminationReason,
 )
 
+
 __all__ = [
 	"Evaluator",
 	"Game",
 	"MoveOrdering",
+	"Canonicalizer",
 
+	"CanonicalPosition",
 	"SearchAlgorithm",
 	"SearchConfig",
 	"SearchLimits",
