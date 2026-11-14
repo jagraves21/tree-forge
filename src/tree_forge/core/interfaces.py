@@ -86,7 +86,11 @@ class Evaluator(ABC, Generic[StateT, PlayerT]):
 
 
 class MoveOrdering(ABC, Generic[StateT, MoveT, PlayerT]):
-	"""Optional interface for game-specific move ordering."""
+	"""Ranks legal moves in their preferred search order.
+
+	Implementations must return every supplied move exactly once.
+	They must not add, omit, or modify moves.
+	"""
 
 	@abstractmethod
 	def order_moves(
@@ -95,10 +99,6 @@ class MoveOrdering(ABC, Generic[StateT, MoveT, PlayerT]):
 		moves: Sequence[MoveT],
 		player: PlayerT,
 	) -> Sequence[MoveT]:
-		"""Return the supplied legal moves in preferred search order.
-
-		Implementations must not add illegal moves or omit legal moves.
-		"""
 		raise NotImplementedError
 
 

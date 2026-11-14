@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from math import inf
 from time import perf_counter
 from typing import Generic, TypeVar
@@ -13,6 +14,7 @@ from ..core import (
 	Canonicalizer,
 	Evaluator,
 	Game,
+	MoveOrdering,
 	SearchLimits,
 	SearchResult,
 	SearchStatistics,
@@ -37,6 +39,7 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 		alpha_beta: bool = False,
 		canonicalizer: Canonicalizer[StateT, MoveT] | None = None,
 		transposition_table: TranspositionTable[MoveT] | None = None,
+		move_ordering: MoveOrdering[StateT, MoveT, PlayerT] | None = None,
 	) -> None:
 		if transposition_table is not None and canonicalizer is None:
 			raise ValueError(
@@ -57,6 +60,8 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 			)
 		else:
 			self.transposition_table = None
+
+		self.move_ordering = move_ordering
 
 	def search(self, state: StateT) -> SearchResult[MoveT]:
 		"""Find the best move for the current player."""
@@ -115,6 +120,44 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 			)
 
 			statistics.transposition_table_stores += 1
+
+		def order_moves(
+			position_state: StateT,
+			moves: Sequence[MoveT],
+			player: PlayerT,
+		) -> list[MoveT]:
+			ordered = list(moves)
+
+			if self.move_ordering is None:
+				return ordered
+
+			ordered = list(
+				self.move_ordering.order_moves(
+					position_state,
+					ordered,
+					player,
+				)
+			)
+
+			# Validate that ordering only rearranged the original moves.
+			remaining = list(moves)
+
+			if len(ordered) != len(remaining):
+				raise ValueError(
+					"MoveOrdering must not add or omit legal moves"
+				)
+
+			for move in ordered:
+				try:
+					index = remaining.index(move)
+				except ValueError as error:
+					raise ValueError(
+						"MoveOrdering must not add or omit legal moves"
+					) from error
+
+				remaining.pop(index)
+
+			return ordered
 
 		def minimax(
 			depth: int | None,
@@ -228,7 +271,11 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 
 				return score
 
-			moves = list(self.game.legal_moves(state))
+			moves = order_moves(
+				state,
+				self.game.legal_moves(state),
+				player,
+			)
 
 			# Handle positions without legal moves.
 			if not moves:
@@ -334,7 +381,11 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 				termination_reason=SearchTerminationReason.COMPLETED,
 			)
 
-		moves = self.game.legal_moves(state)
+		moves = order_moves(
+			state,
+			self.game.legal_moves(state),
+			root_player,
+		)
 
 		# Handle positions without legal moves.
 		if not moves:
