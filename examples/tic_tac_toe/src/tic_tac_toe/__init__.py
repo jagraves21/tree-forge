@@ -7,6 +7,8 @@ from .game import (
 	UndoData,
 )
 
+from .evaluator import TicTacToeEvaluator
+
 from .canonicalizer import TicTacToeCanonicalizer
 
 from .move_ordering import TicTacToeMoveOrdering
@@ -19,6 +21,8 @@ __all__ = [
 	"Player",
 	"TicTacToeGame",
 	"UndoData",
+
+	"TicTacToeEvaluator",
 
 	"TicTacToeCanonicalizer",
 

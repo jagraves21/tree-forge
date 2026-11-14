@@ -14,7 +14,7 @@ class TestTicTacToeCanonicalizer:
 	@pytest.fixture(autouse=True)
 	def setup(self) -> None:
 		self.game = TicTacToeGame()
-		self.canonicalizer = TicTacToeCanonicalizer(self.game)
+		self.canonicalizer = TicTacToeCanonicalizer()
 
 	def make_state(
 		self,
