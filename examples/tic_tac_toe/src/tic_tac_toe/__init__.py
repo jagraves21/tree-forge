@@ -9,6 +9,8 @@ from .game import (
 
 from .canonicalizer import TicTacToeCanonicalizer
 
+from .move_ordering import TicTacToeMoveOrdering
+
 
 __all__ = [
 	"BOARD_SIZE",
@@ -19,5 +21,7 @@ __all__ = [
 	"UndoData",
 
 	"TicTacToeCanonicalizer",
+
+	"TicTacToeMoveOrdering",
 ]
 

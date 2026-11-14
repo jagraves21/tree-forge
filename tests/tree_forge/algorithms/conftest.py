@@ -1,8 +1,10 @@
+
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import pytest
 
-from tree_forge.core.interfaces import Game
+from tree_forge.core.interfaces import Game, MoveOrdering
 
 
 @dataclass
@@ -94,6 +96,18 @@ class SimpleGame(Game[SimpleState, SimpleMove, int, SimpleUndo]):
 
 	def position_hash(self, state: SimpleState) -> int:
 		return hash((state.node, state.current_player))
+
+
+class ReverseMoveOrdering(MoveOrdering[SimpleState, SimpleMove, int]):
+	"""Reverses legal move order for testing."""
+
+	def order_moves(
+		self,
+		state: SimpleState,
+		moves: Sequence[SimpleMove],
+		player: int,
+	) -> Sequence[SimpleMove]:
+		return list(reversed(moves))
 
 
 @pytest.fixture

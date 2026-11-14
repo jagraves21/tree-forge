@@ -22,7 +22,7 @@ class Player(Enum):
 		return Player.O if self is Player.X else Player.X
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, order=True, slots=True)
 class Move:
 	"""A move represented by a board coordinate."""
 
