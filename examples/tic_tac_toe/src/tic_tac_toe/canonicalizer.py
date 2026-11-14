@@ -14,9 +14,6 @@ from .game import (
 class TicTacToeCanonicalizer(Canonicalizer[GameState, Move]):
 	"""Canonicalize Tic-Tac-Toe positions using board symmetries."""
 
-	def __init__(self, game: TicTacToeGame) -> None:
-		self.game = game
-
 	def position_key(self, state: GameState) -> str:
 		"""Return the complete position as a string."""
 		return self._board_to_string(
