@@ -1,3 +1,4 @@
+
 from .core import (
 	CanonicalPosition,
 	Canonicalizer,
@@ -17,6 +18,13 @@ from .algorithms import (
 	Minimax,
 )
 
+from .caching import (
+	SearchDependencyTracker,
+	TranspositionBound,
+	TranspositionEntry,
+	TranspositionTable,
+)
+
 
 __all__ = [
 	"CanonicalPosition",
@@ -33,4 +41,10 @@ __all__ = [
 	
 	"RandomSearch",
 	"Minimax",
+	
+	"SearchDependencyTracker",
+	"TranspositionBound",
+	"TranspositionEntry",
+	"TranspositionTable",
 ]
+
