@@ -112,6 +112,10 @@ class SearchStatistics:
 	"""Statistics collected during a search operation.
 
 	Counters are cumulative across iterative-deepening passes.
+
+	completed_depth represents the deepest fully completed
+	iteration. max_ply_reached represents the deepest recursive
+	ply visited, even if that iteration was interrupted.
 	"""
 
 	nodes_visited: int = 0
@@ -122,9 +126,31 @@ class SearchStatistics:
 
 	transposition_table_hits: int = 0
 	transposition_table_stores: int = 0
+	transposition_table_invalidations: int = 0
+
+	iterations_completed: int = 0
 
 	elapsed_time_seconds: float = 0.0
 	completed_depth: int = 0
+	max_ply_reached: int = 0
+
+	def __str__(self) -> str:
+		return "\n".join([
+			"SEARCH STATISTICS",
+			"=" * 35,
+			f"{'Nodes visited:':<25} {self.nodes_visited:,}",
+			f"{'Leaf nodes:':<25} {self.leaf_nodes:,}",
+			f"{'Terminal nodes:':<25} {self.terminal_nodes:,}",
+			f"{'Alpha-beta cutoffs:':<25} {self.cutoffs:,}",
+			f"{'Transposition hits:':<25} {self.transposition_table_hits:,}",
+			f"{'Transposition stores:':<25} {self.transposition_table_stores:,}",
+			f"{'Transposition invalidations:':<25} {self.transposition_table_invalidations:,}",
+			f"{'Search time:':<25} {self.elapsed_time_seconds:.6f}s",
+			f"{'Completed depth:':<25} {self.completed_depth}",
+			f"{'Iterations completed:':<25} {self.iterations_completed}",
+			f"{'Maximum ply reached:':<25} {self.max_ply_reached}",
+			"=" * 35,
+		])
 
 
 @dataclass(slots=True)
@@ -152,4 +178,16 @@ class SearchResult(Generic[MoveT]):
 	def completed_depth(self) -> int:
 		"""Return the deepest fully completed search depth."""
 		return self.statistics.completed_depth
+
+	def __str__(self) -> str:
+		return "\n".join([
+			"SEARCH RESULT",
+			"=" * 35,
+			f"{'Best move:':<25} {self.best_move}",
+			f"{'Score:':<25} {self.score:.2f}",
+			f"{'Completed:':<25} {self.completed}",
+			f"{'Termination reason:':<25} {self.termination_reason.value}",
+			"",
+			str(self.statistics),
+		])
 
