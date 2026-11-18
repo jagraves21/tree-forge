@@ -26,5 +26,9 @@ include = ["tree_forge*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "examples/tic_tac_toe/src"]
+pythonpath = [
+	"src",
+	"examples/tic_tac_toe/src",
+	"examples/connect_four/src",
+]
 
