@@ -3,8 +3,8 @@ from __future__ import annotations
 from random import choice
 from typing import Generic, TypeVar
 
-from tree_forge.core.interfaces import Game
-from tree_forge.core.models import (
+from ..core.interfaces import Game
+from ..core.models import (
 	SearchResult,
 	SearchStatistics,
 	SearchTerminationReason,
