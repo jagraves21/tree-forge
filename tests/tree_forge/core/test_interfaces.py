@@ -1,3 +1,5 @@
+from collections.abc import Hashable, Sequence
+
 import pytest
 
 from tree_forge.core.interfaces import (
@@ -6,240 +8,291 @@ from tree_forge.core.interfaces import (
 	Game,
 	MoveOrdering,
 )
+from tree_forge.core.models import CanonicalPosition
 
 
-class DummyGame(Game[list[int], int, str, int]):
-	"""Minimal concrete game implementation for interface tests."""
-
-	def initial_state(self) -> list[int]:
-		return []
-
-	def current_player(self, state: list[int]) -> str:
-		return "X"
-
-	def legal_moves(self, state: list[int]) -> list[int]:
-		return [0, 1, 2]
-
-	def make_move(self, state: list[int], move: int) -> int:
-		undo_data = len(state)
-		state.append(move)
-		return undo_data
-
-	def unmake_move(
-		self,
-		state: list[int],
-		move: int,
-		undo_data: int,
-	) -> None:
-		del state[undo_data:]
-
-	def is_terminal(self, state: list[int]) -> bool:
-		return len(state) >= 3
-
-	def terminal_score(self, state: list[int], player: str) -> float:
-		return 1.0 if player == "X" else -1.0
+def stub(self, *args, **kwargs):
+	"""Placeholder implementation for an abstract method."""
+	return None
 
 
-class DummyCanonicalizer(Canonicalizer[list[int], int]):
-	"""Minimal concrete canonicalizer implementation."""
+def make_partial_subclass(base: type, missing: str) -> type:
+	"""Create a subclass that implements every abstract method but one."""
+	namespace = {
+		name: stub
+		for name in base.__abstractmethods__
+		if name != missing
+	}
 
-	def position_key(self, state: list[int]) -> tuple:
+	return type("PartialImplementation", (base,), namespace)
+
+
+def make_complete_subclass(base: type) -> type:
+	"""Create a subclass that implements every abstract method."""
+	namespace = {name: stub for name in base.__abstractmethods__}
+
+	return type("CompleteImplementation", (base,), namespace)
+
+
+class ListCanonicalizer(Canonicalizer[list[int], int]):
+	"""Canonicalizer that only implements the required position_key()."""
+
+	def position_key(self, state: list[int]) -> Hashable:
 		return tuple(state), "X"
 
 
-class CanonicalizerWithoutPositionKey(Canonicalizer[list[int], int]):
-	"""Canonicalizer that does not implement position_key."""
+class SortingCanonicalizer(ListCanonicalizer):
+	"""Canonicalizer that treats permutations of a state as equivalent."""
+
+	def canonical_position_key(self, state: list[int]) -> Hashable:
+		return tuple(sorted(state))
 
 
-class DummyEvaluator(Evaluator[list[int], str]):
-	def evaluate(self, state: list[int], player: str) -> float:
-		return float(len(state))
+class TestGame:
+	REQUIRED_METHODS = {
+		"initial_state": (),
+		"current_player": ("state",),
+		"legal_moves": ("state",),
+		"make_move": ("state", "move"),
+		"unmake_move": ("state", "move", "undo_data"),
+		"is_terminal": ("state",),
+		"terminal_score": ("state", "player"),
+	}
 
+	def test_declares_expected_abstract_methods(self) -> None:
+		assert Game.__abstractmethods__ == frozenset(self.REQUIRED_METHODS)
 
-class DummyMoveOrdering(MoveOrdering[list[int], int, str]):
-	def order_moves(
-		self,
-		state: list[int],
-		moves: list[int],
-		player: str,
-	) -> list[int]:
-		return sorted(moves, reverse=True)
-
-
-class IncompleteGame(Game[list[int], int, str, int]):
-	"""Intentionally incomplete implementation."""
-
-
-class IncompleteEvaluator(Evaluator[list[int], str]):
-	"""Intentionally incomplete implementation."""
-
-
-class IncompleteMoveOrdering(MoveOrdering[list[int], int, str]):
-	"""Intentionally incomplete implementation."""
-
-
-class TestGameInterface:
-	def test_game_is_abstract(self):
+	def test_cannot_be_instantiated_directly(self) -> None:
 		with pytest.raises(TypeError):
 			Game()
 
-	def test_incomplete_game_cannot_be_instantiated(self):
-		with pytest.raises(TypeError):
-			IncompleteGame()
+	@pytest.mark.parametrize("missing", sorted(REQUIRED_METHODS))
+	def test_cannot_be_instantiated_without_required_method(
+		self,
+		missing: str,
+	) -> None:
+		partial = make_partial_subclass(Game, missing)
 
-	def test_concrete_game_can_be_instantiated(self):
-		game = DummyGame()
+		with pytest.raises(TypeError, match=missing):
+			partial()
+
+	def test_can_be_instantiated_when_complete(self) -> None:
+		game = make_complete_subclass(Game)()
 
 		assert isinstance(game, Game)
 
-	def test_initial_state(self):
-		game = DummyGame()
+	@pytest.mark.parametrize(
+		"method, arguments",
+		sorted(REQUIRED_METHODS.items()),
+	)
+	def test_base_methods_raise_not_implemented_error(
+		self,
+		method: str,
+		arguments: tuple[str, ...],
+	) -> None:
+		game = make_complete_subclass(Game)()
 
-		assert game.initial_state() == []
-
-	def test_current_player(self):
-		game = DummyGame()
-
-		assert game.current_player([]) == "X"
-
-	def test_legal_moves(self):
-		game = DummyGame()
-
-		assert game.legal_moves([]) == [0, 1, 2]
-
-	def test_make_and_unmake_move(self):
-		game = DummyGame()
-		state = [1, 2]
-
-		original_state = state.copy()
-
-		undo_data = game.make_move(state, 3)
-
-		assert state == [1, 2, 3]
-
-		game.unmake_move(state, 3, undo_data)
-
-		assert state == original_state
-
-	def test_is_terminal(self):
-		game = DummyGame()
-
-		assert not game.is_terminal([1, 2])
-		assert game.is_terminal([1, 2, 3])
-
-	def test_terminal_score(self):
-		game = DummyGame()
-		state = [1, 2, 3]
-
-		assert game.terminal_score(state, "X") == 1.0
-		assert game.terminal_score(state, "O") == -1.0
+		with pytest.raises(NotImplementedError):
+			getattr(Game, method)(game, *arguments)
 
 
-class TestCanonicalizerInterface:
-	def test_canonicalizer_is_abstract(self):
+class TestEvaluator:
+	def test_declares_expected_abstract_methods(self) -> None:
+		assert Evaluator.__abstractmethods__ == frozenset({"evaluate"})
+
+	def test_cannot_be_instantiated_directly(self) -> None:
+		with pytest.raises(TypeError):
+			Evaluator()
+
+	def test_cannot_be_instantiated_without_evaluate(self) -> None:
+		partial = make_partial_subclass(Evaluator, "evaluate")
+
+		with pytest.raises(TypeError, match="evaluate"):
+			partial()
+
+	def test_can_be_instantiated_when_complete(self) -> None:
+		evaluator = make_complete_subclass(Evaluator)()
+
+		assert isinstance(evaluator, Evaluator)
+
+	def test_base_evaluate_raises_not_implemented_error(self) -> None:
+		evaluator = make_complete_subclass(Evaluator)()
+
+		with pytest.raises(NotImplementedError):
+			Evaluator.evaluate(evaluator, "state", "player")
+
+
+class TestMoveOrdering:
+	def test_declares_expected_abstract_methods(self) -> None:
+		assert MoveOrdering.__abstractmethods__ == frozenset({"order_moves"})
+
+	def test_cannot_be_instantiated_directly(self) -> None:
+		with pytest.raises(TypeError):
+			MoveOrdering()
+
+	def test_cannot_be_instantiated_without_order_moves(self) -> None:
+		partial = make_partial_subclass(MoveOrdering, "order_moves")
+
+		with pytest.raises(TypeError, match="order_moves"):
+			partial()
+
+	def test_can_be_instantiated_when_complete(self) -> None:
+		ordering = make_complete_subclass(MoveOrdering)()
+
+		assert isinstance(ordering, MoveOrdering)
+
+	def test_base_order_moves_raises_not_implemented_error(self) -> None:
+		ordering = make_complete_subclass(MoveOrdering)()
+		moves: Sequence[int] = [1, 2, 3]
+
+		with pytest.raises(NotImplementedError):
+			MoveOrdering.order_moves(ordering, "state", moves, "player")
+
+
+class TestCanonicalizerAbstractInterface:
+	def test_declares_only_position_key_as_abstract(self) -> None:
+		assert Canonicalizer.__abstractmethods__ == frozenset({"position_key"})
+
+	def test_cannot_be_instantiated_directly(self) -> None:
 		with pytest.raises(TypeError):
 			Canonicalizer()
 
-	def test_canonicalizer_requires_position_key(self):
-		with pytest.raises(TypeError):
-			CanonicalizerWithoutPositionKey()
+	def test_cannot_be_instantiated_without_position_key(self) -> None:
+		partial = make_partial_subclass(Canonicalizer, "position_key")
 
-	def test_concrete_canonicalizer_can_be_instantiated(self):
-		canonicalizer = DummyCanonicalizer()
+		with pytest.raises(TypeError, match="position_key"):
+			partial()
+
+	def test_can_be_instantiated_with_only_position_key(self) -> None:
+		canonicalizer = ListCanonicalizer()
 
 		assert isinstance(canonicalizer, Canonicalizer)
 
-	def test_position_key(self):
-		canonicalizer = DummyCanonicalizer()
+	def test_base_position_key_raises_not_implemented_error(self) -> None:
+		canonicalizer = ListCanonicalizer()
 
-		assert canonicalizer.position_key([1, 2]) == ((1, 2), "X")
+		with pytest.raises(NotImplementedError):
+			Canonicalizer.position_key(canonicalizer, [1, 2])
 
-	def test_position_hash(self):
-		canonicalizer = DummyCanonicalizer()
 
-		assert canonicalizer.position_hash([1, 2]) == hash(((1, 2), "X"))
+class TestCanonicalizerDefaults:
+	@pytest.fixture
+	def canonicalizer(self) -> ListCanonicalizer:
+		return ListCanonicalizer()
+
+	def test_position_hash_hashes_position_key(
+		self,
+		canonicalizer: ListCanonicalizer,
+	) -> None:
+		state = [1, 2]
+
+		assert canonicalizer.position_hash(state) == hash(
+			canonicalizer.position_key(state)
+		)
+
+	def test_position_hash_is_stable_for_equal_states(
+		self,
+		canonicalizer: ListCanonicalizer,
+	) -> None:
 		assert canonicalizer.position_hash([1, 2]) == (
 			canonicalizer.position_hash([1, 2])
 		)
 
-	def test_position_hash_changes_with_position(self):
-		canonicalizer = DummyCanonicalizer()
+	def test_position_hash_requires_hashable_key(self) -> None:
+		class UnhashableKeyCanonicalizer(Canonicalizer[list[int], int]):
+			def position_key(self, state: list[int]) -> Hashable:
+				return list(state)
 
-		assert canonicalizer.position_hash([1, 2]) != (
-			canonicalizer.position_hash([1, 3])
-		)
+		with pytest.raises(TypeError):
+			UnhashableKeyCanonicalizer().position_hash([1])
 
-	def test_canonical_position_key_defaults_to_position_key(self):
-		canonicalizer = DummyCanonicalizer()
+	def test_canonical_position_key_defaults_to_position_key(
+		self,
+		canonicalizer: ListCanonicalizer,
+	) -> None:
 		state = [1, 2]
 
 		assert canonicalizer.canonical_position_key(state) == (
 			canonicalizer.position_key(state)
 		)
 
-	def test_canonical_position_hash(self):
-		canonicalizer = DummyCanonicalizer()
+	def test_canonical_position_hash_hashes_canonical_key(
+		self,
+		canonicalizer: ListCanonicalizer,
+	) -> None:
 		state = [1, 2]
 
 		assert canonicalizer.canonical_position_hash(state) == hash(
 			canonicalizer.canonical_position_key(state)
 		)
 
-	def test_canonicalize_defaults_to_identity(self):
-		canonicalizer = DummyCanonicalizer()
-		state = [1, 2]
-		position = canonicalizer.canonicalize(state)
-
-		assert position.key == canonicalizer.canonical_position_key(state)
-
-	def test_default_move_transformations_are_identity(self):
-		canonicalizer = DummyCanonicalizer()
+	def test_canonicalize_returns_canonical_position(
+		self,
+		canonicalizer: ListCanonicalizer,
+	) -> None:
 		position = canonicalizer.canonicalize([1, 2])
 
-		move = 3
+		assert isinstance(position, CanonicalPosition)
 
-		assert position.to_canonical_move(move) == move
-		assert position.from_canonical_move(move) == move
+	def test_canonicalize_uses_canonical_position_key(
+		self,
+		canonicalizer: ListCanonicalizer,
+	) -> None:
+		state = [1, 2]
 
+		assert canonicalizer.canonicalize(state).key == (
+			canonicalizer.canonical_position_key(state)
+		)
 
-class TestEvaluatorInterface:
-	def test_evaluator_is_abstract(self):
-		with pytest.raises(TypeError):
-			Evaluator()
+	def test_canonicalize_defaults_to_identity_move_transformations(
+		self,
+		canonicalizer: ListCanonicalizer,
+	) -> None:
+		position = canonicalizer.canonicalize([1, 2])
+		move = object()
 
-	def test_incomplete_evaluator_cannot_be_instantiated(self):
-		with pytest.raises(TypeError):
-			IncompleteEvaluator()
-
-	def test_concrete_evaluator_can_be_instantiated(self):
-		evaluator = DummyEvaluator()
-
-		assert isinstance(evaluator, Evaluator)
-
-	def test_evaluate(self):
-		evaluator = DummyEvaluator()
-
-		assert evaluator.evaluate([1, 2, 3], "X") == 3.0
+		assert position.to_canonical_move(move) is move
+		assert position.from_canonical_move(move) is move
 
 
-class TestMoveOrderingInterface:
-	def test_move_ordering_is_abstract(self):
-		with pytest.raises(TypeError):
-			MoveOrdering()
+class TestCanonicalizerOverrides:
+	"""Defaults must dispatch to overridden methods."""
 
-	def test_incomplete_move_ordering_cannot_be_instantiated(self):
-		with pytest.raises(TypeError):
-			IncompleteMoveOrdering()
+	@pytest.fixture
+	def canonicalizer(self) -> SortingCanonicalizer:
+		return SortingCanonicalizer()
 
-	def test_concrete_move_ordering_can_be_instantiated(self):
-		ordering = DummyMoveOrdering()
+	def test_exact_position_key_is_unaffected_by_canonical_override(
+		self,
+		canonicalizer: SortingCanonicalizer,
+	) -> None:
+		assert canonicalizer.position_key([2, 1]) == ((2, 1), "X")
 
-		assert isinstance(ordering, MoveOrdering)
+	def test_canonical_position_hash_uses_overridden_canonical_key(
+		self,
+		canonicalizer: SortingCanonicalizer,
+	) -> None:
+		assert canonicalizer.canonical_position_hash([2, 1]) == hash((1, 2))
 
-	def test_order_moves(self):
-		ordering = DummyMoveOrdering()
+	def test_canonicalize_uses_overridden_canonical_key(
+		self,
+		canonicalizer: SortingCanonicalizer,
+	) -> None:
+		assert canonicalizer.canonicalize([2, 1]).key == (1, 2)
 
-		moves = [1, 3, 2]
+	def test_equivalent_states_share_canonical_identity(
+		self,
+		canonicalizer: SortingCanonicalizer,
+	) -> None:
+		first = [1, 2, 3]
+		second = [3, 1, 2]
 
-		assert ordering.order_moves([], moves, "X") == [3, 2, 1]
-
+		assert canonicalizer.position_key(first) != (
+			canonicalizer.position_key(second)
+		)
+		assert canonicalizer.canonical_position_key(first) == (
+			canonicalizer.canonical_position_key(second)
+		)
+		assert canonicalizer.canonical_position_hash(first) == (
+			canonicalizer.canonical_position_hash(second)
+		)

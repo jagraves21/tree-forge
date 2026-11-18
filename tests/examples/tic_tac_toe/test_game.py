@@ -1,3 +1,5 @@
+import random
+
 import pytest
 
 from tic_tac_toe.game import (
@@ -6,285 +8,711 @@ from tic_tac_toe.game import (
 	Move,
 	Player,
 	TicTacToeGame,
+	UndoData,
 )
 
 
-DRAW_MOVES = [
-	(0, 0), (0, 1),
-	(0, 2), (1, 0),
-	(1, 1), (2, 0),
-	(1, 2), (2, 2),
-	(2, 1),
+ALL_MOVES = tuple(
+	Move(row, column)
+	for row in range(BOARD_SIZE)
+	for column in range(BOARD_SIZE)
+)
+
+WINNING_LINES = [
+	pytest.param(((0, 0), (0, 1), (0, 2)), id="top-row"),
+	pytest.param(((1, 0), (1, 1), (1, 2)), id="middle-row"),
+	pytest.param(((2, 0), (2, 1), (2, 2)), id="bottom-row"),
+	pytest.param(((0, 0), (1, 0), (2, 0)), id="left-column"),
+	pytest.param(((0, 1), (1, 1), (2, 1)), id="middle-column"),
+	pytest.param(((0, 2), (1, 2), (2, 2)), id="right-column"),
+	pytest.param(((0, 0), (1, 1), (2, 2)), id="main-diagonal"),
+	pytest.param(((0, 2), (1, 1), (2, 0)), id="anti-diagonal"),
 ]
 
+# X wins on the top row after five moves.
+X_WINS_MOVES = [(0, 0), (1, 0), (0, 1), (1, 1), (0, 2)]
 
-class TestTicTacToeGame:
-	@pytest.fixture
-	def game(self):
-		return TicTacToeGame()
+# A complete game without a winner.
+DRAW_ROWS = ("XOX", "XOO", "OXX")
 
-	@pytest.fixture
-	def state(self, game):
-		return game.initial_state()
 
-	def play_moves(self, game, state, moves):
-		"""Apply a sequence of moves to a game state."""
-		for row, column in moves:
-			game.make_move(state, Move(row, column))
+def play(game: TicTacToeGame, state: GameState, moves) -> None:
+	for row, column in moves:
+		game.make_move(state, Move(row, column))
 
-	# Initial state
 
-	def test_initial_state_is_empty(self, game, state):
-		assert state.current_player is Player.X
-		assert all(
-			cell is None
-			for row in state.board
-			for cell in row
+class TestBoardSize:
+	def test_board_is_three_by_three(self) -> None:
+		assert BOARD_SIZE == 3
+
+
+class TestPlayer:
+	def test_opponent_of_x_is_o(self) -> None:
+		assert Player.X.opponent is Player.O
+
+	def test_opponent_of_o_is_x(self) -> None:
+		assert Player.O.opponent is Player.X
+
+	@pytest.mark.parametrize("player", list(Player))
+	def test_opponent_of_opponent_is_the_player(self, player: Player) -> None:
+		assert player.opponent.opponent is player
+
+	def test_players_have_distinct_values(self) -> None:
+		assert Player.X.value != Player.O.value
+
+
+class TestMove:
+	def test_stores_row_and_column(self) -> None:
+		move = Move(1, 2)
+
+		assert move.row == 1
+		assert move.column == 2
+
+	def test_moves_with_equal_coordinates_are_equal_and_hashable(self) -> None:
+		assert Move(1, 2) == Move(1, 2)
+		assert hash(Move(1, 2)) == hash(Move(1, 2))
+		assert len({Move(1, 2), Move(1, 2), Move(2, 1)}) == 2
+
+	def test_moves_are_ordered_by_row_then_column(self) -> None:
+		assert Move(0, 2) < Move(1, 0)
+		assert Move(1, 0) < Move(1, 1)
+		assert sorted([Move(2, 0), Move(0, 1), Move(0, 0)]) == [
+			Move(0, 0),
+			Move(0, 1),
+			Move(2, 0),
+		]
+
+	def test_is_immutable(self) -> None:
+		move = Move(0, 0)
+
+		with pytest.raises(AttributeError):
+			move.row = 1
+
+
+class TestGameState:
+	def test_default_board_is_empty(self) -> None:
+		state = GameState()
+
+		assert len(state.board) == BOARD_SIZE
+		assert all(len(row) == BOARD_SIZE for row in state.board)
+		assert all(cell is None for row in state.board for cell in row)
+
+	def test_x_moves_first_by_default(self) -> None:
+		assert GameState().current_player is Player.X
+
+	def test_default_boards_are_independent(self) -> None:
+		first = GameState()
+		second = GameState()
+
+		first.board[0][0] = Player.X
+
+		assert second.board[0][0] is None
+
+	def test_default_board_rows_are_independent(self) -> None:
+		state = GameState()
+
+		state.board[0][0] = Player.X
+
+		assert state.board[1][0] is None
+
+	def test_states_with_equal_contents_are_equal(self) -> None:
+		assert GameState() == GameState()
+		assert GameState() != GameState(current_player=Player.O)
+
+
+class TestGameStateString:
+	def test_renders_empty_board(self) -> None:
+		assert str(GameState()) == "\n".join([
+			"    0   1   2",
+			"  ┌───┬───┬───┐",
+			"0 │   │   │   │",
+			"  ├───┼───┼───┤",
+			"1 │   │   │   │",
+			"  ├───┼───┼───┤",
+			"2 │   │   │   │",
+			"  └───┴───┴───┘",
+			"Current player: X",
+		])
+
+	def test_renders_pieces_in_their_cells(self, make_state) -> None:
+		state = make_state(
+			"O..",
+			".X.",
+			"..O",
+			current_player=Player.O,
 		)
 
-	def test_initial_state_is_not_terminal(self, game, state):
-		assert not game.is_terminal(state)
+		assert str(state) == "\n".join([
+			"    0   1   2",
+			"  ┌───┬───┬───┐",
+			"0 │ O │   │   │",
+			"  ├───┼───┼───┤",
+			"1 │   │ X │   │",
+			"  ├───┼───┼───┤",
+			"2 │   │   │ O │",
+			"  └───┴───┴───┘",
+			"Current player: O",
+		])
 
-	def test_initial_state_has_nine_legal_moves(self, game, state):
-		moves = game.legal_moves(state)
 
-		assert len(moves) == 9
-		assert set(moves) == {
-			Move(row, column)
-			for row in range(BOARD_SIZE)
-			for column in range(BOARD_SIZE)
-		}
+class TestUndoData:
+	def test_stores_fields(self) -> None:
+		undo = UndoData(
+			row=1,
+			column=2,
+			player=Player.X,
+			previous_player=Player.O,
+		)
 
-	# Move generation
+		assert undo.row == 1
+		assert undo.column == 2
+		assert undo.player is Player.X
+		assert undo.previous_player is Player.O
 
-	def test_legal_moves_exclude_occupied_positions(self, game, state):
-		game.make_move(state, Move(1, 1))
+	def test_is_immutable(self) -> None:
+		undo = UndoData(0, 0, Player.X, Player.X)
 
-		moves = game.legal_moves(state)
+		with pytest.raises(AttributeError):
+			undo.row = 1
 
-		assert len(moves) == 8
-		assert Move(1, 1) not in moves
 
-	def test_legal_moves_returns_empty_for_terminal_position(
+class TestInitialState:
+	def test_initial_state_is_an_empty_board_with_x_to_move(
 		self,
-		game,
-		state,
-	):
-		self.play_moves(
-			game,
-			state,
-			[
-				(0, 0),
-				(1, 0),
-				(0, 1),
-				(1, 1),
-				(0, 2),
-			],
-		)
+		game: TicTacToeGame,
+	) -> None:
+		state = game.initial_state()
 
-		assert game.is_terminal(state)
-		assert game.legal_moves(state) == ()
+		assert state == GameState()
 
-	def test_illegal_move_raises_value_error(self, game, state):
-		game.make_move(state, Move(0, 0))
+	def test_each_initial_state_is_a_new_object(
+		self,
+		game: TicTacToeGame,
+	) -> None:
+		first = game.initial_state()
+		second = game.initial_state()
 
-		with pytest.raises(ValueError):
-			game.make_move(state, Move(0, 0))
+		first.board[0][0] = Player.X
 
-	def test_move_outside_board_raises_value_error(self, game, state):
-		with pytest.raises(ValueError):
-			game.make_move(state, Move(3, 0))
+		assert second.board[0][0] is None
 
-	# Making and undoing moves
+	def test_initial_state_is_not_terminal(self, game: TicTacToeGame) -> None:
+		assert not game.is_terminal(game.initial_state())
 
-	def test_make_move_places_current_player_marker(self, game, state):
-		game.make_move(state, Move(1, 2))
 
-		assert state.board[1][2] is Player.X
+class TestCurrentPlayer:
+	def test_reports_the_player_to_move(self, game: TicTacToeGame) -> None:
+		state = game.initial_state()
 
-	def test_make_move_switches_current_player(self, game, state):
+		assert game.current_player(state) is Player.X
+
 		game.make_move(state, Move(0, 0))
 
 		assert game.current_player(state) is Player.O
 
-	def test_make_move_returns_undo_data(self, game, state):
-		move = Move(0, 0)
+	def test_follows_the_state_attribute(self, game: TicTacToeGame) -> None:
+		state = GameState(current_player=Player.O)
 
-		undo_data = game.make_move(state, move)
+		assert game.current_player(state) is Player.O
 
-		assert undo_data.row == move.row
-		assert undo_data.column == move.column
-		assert undo_data.player is Player.X
-		assert undo_data.previous_player is Player.X
 
-	def test_unmake_move_restores_previous_state(self, game, state):
-		original_board = [row.copy() for row in state.board]
-		original_player = state.current_player
+class TestLegalMoves:
+	def test_empty_board_has_nine_moves_in_row_major_order(
+		self,
+		game: TicTacToeGame,
+	) -> None:
+		assert game.legal_moves(game.initial_state()) == ALL_MOVES
 
-		move = Move(1, 1)
-		undo_data = game.make_move(state, move)
+	def test_returns_a_tuple(self, game: TicTacToeGame) -> None:
+		assert isinstance(game.legal_moves(game.initial_state()), tuple)
 
-		game.unmake_move(state, move, undo_data)
+	def test_excludes_occupied_cells(self, game: TicTacToeGame) -> None:
+		state = game.initial_state()
+		play(game, state, [(1, 1), (0, 0)])
 
-		assert state.board == original_board
-		assert state.current_player is original_player
+		moves = game.legal_moves(state)
 
-	def test_unmake_move_restores_multiple_moves(self, game, state):
-		original_state = GameState(
+		assert len(moves) == 7
+		assert Move(1, 1) not in moves
+		assert Move(0, 0) not in moves
+
+	def test_preserves_row_major_order_with_gaps(
+		self,
+		game: TicTacToeGame,
+		make_state,
+	) -> None:
+		state = make_state("X.O", ".X.", "O..")
+
+		assert game.legal_moves(state) == (
+			Move(0, 1),
+			Move(1, 0),
+			Move(1, 2),
+			Move(2, 1),
+			Move(2, 2),
+		)
+
+	def test_last_empty_cell_is_the_only_move(
+		self,
+		game: TicTacToeGame,
+		make_state,
+	) -> None:
+		state = make_state("XOX", "OXO", "OX.")
+
+		assert game.legal_moves(state) == (Move(2, 2),)
+
+	def test_no_moves_once_a_player_has_won(
+		self,
+		game: TicTacToeGame,
+	) -> None:
+		state = game.initial_state()
+		play(game, state, X_WINS_MOVES)
+
+		assert game.legal_moves(state) == ()
+
+	def test_no_moves_on_a_full_board(
+		self,
+		game: TicTacToeGame,
+		make_state,
+	) -> None:
+		assert game.legal_moves(make_state(*DRAW_ROWS)) == ()
+
+
+class TestMakeMove:
+	def test_places_the_current_players_marker(
+		self,
+		game: TicTacToeGame,
+	) -> None:
+		state = game.initial_state()
+
+		game.make_move(state, Move(1, 2))
+
+		assert state.board[1][2] is Player.X
+
+	def test_only_the_chosen_cell_changes(self, game: TicTacToeGame) -> None:
+		state = game.initial_state()
+
+		game.make_move(state, Move(1, 2))
+
+		occupied = [
+			(row, column)
+			for row in range(BOARD_SIZE)
+			for column in range(BOARD_SIZE)
+			if state.board[row][column] is not None
+		]
+
+		assert occupied == [(1, 2)]
+
+	def test_switches_the_current_player(self, game: TicTacToeGame) -> None:
+		state = game.initial_state()
+
+		game.make_move(state, Move(0, 0))
+		assert state.current_player is Player.O
+
+		game.make_move(state, Move(0, 1))
+		assert state.current_player is Player.X
+
+	def test_alternates_markers(self, game: TicTacToeGame) -> None:
+		state = game.initial_state()
+
+		play(game, state, [(0, 0), (0, 1), (0, 2)])
+
+		assert state.board[0] == [Player.X, Player.O, Player.X]
+
+	def test_returns_undo_data(self, game: TicTacToeGame) -> None:
+		state = game.initial_state()
+
+		undo = game.make_move(state, Move(2, 1))
+
+		assert undo == UndoData(
+			row=2,
+			column=1,
+			player=Player.X,
+			previous_player=Player.X,
+		)
+
+	def test_undo_data_records_the_mover_for_the_second_player(
+		self,
+		game: TicTacToeGame,
+	) -> None:
+		state = game.initial_state()
+		game.make_move(state, Move(0, 0))
+
+		undo = game.make_move(state, Move(1, 1))
+
+		assert undo.player is Player.O
+
+	@pytest.mark.parametrize("move", [
+		pytest.param(Move(0, 0), id="occupied"),
+		pytest.param(Move(3, 0), id="row-too-large"),
+		pytest.param(Move(0, 3), id="column-too-large"),
+		pytest.param(Move(-1, 0), id="negative-row"),
+		pytest.param(Move(0, -1), id="negative-column"),
+	])
+	def test_rejects_illegal_moves(
+		self,
+		game: TicTacToeGame,
+		move: Move,
+	) -> None:
+		state = game.initial_state()
+		game.make_move(state, Move(0, 0))
+
+		with pytest.raises(ValueError, match="Illegal move"):
+			game.make_move(state, move)
+
+	def test_rejected_move_leaves_the_state_unchanged(
+		self,
+		game: TicTacToeGame,
+	) -> None:
+		state = game.initial_state()
+		game.make_move(state, Move(0, 0))
+		before = GameState(
 			board=[row.copy() for row in state.board],
 			current_player=state.current_player,
 		)
 
-		moves = [
-			Move(0, 0),
-			Move(1, 1),
-			Move(0, 1),
-		]
-		undo_data = []
+		with pytest.raises(ValueError):
+			game.make_move(state, Move(0, 0))
 
-		for move in moves:
-			undo_data.append(game.make_move(state, move))
+		assert state == before
 
-		for move, undo in reversed(list(zip(moves, undo_data))):
+	def test_rejects_moves_after_the_game_is_won(
+		self,
+		game: TicTacToeGame,
+	) -> None:
+		state = game.initial_state()
+		play(game, state, X_WINS_MOVES)
+
+		with pytest.raises(ValueError, match="Illegal move"):
+			game.make_move(state, Move(2, 2))
+
+
+class TestUnmakeMove:
+	def test_restores_the_previous_state(self, game: TicTacToeGame) -> None:
+		state = game.initial_state()
+		move = Move(1, 1)
+
+		undo = game.make_move(state, move)
+		game.unmake_move(state, move, undo)
+
+		assert state == GameState()
+
+	def test_restores_the_previous_player(self, game: TicTacToeGame) -> None:
+		state = game.initial_state()
+		game.make_move(state, Move(0, 0))
+		move = Move(1, 1)
+
+		undo = game.make_move(state, move)
+		game.unmake_move(state, move, undo)
+
+		assert state.current_player is Player.O
+		assert state.board[0][0] is Player.X
+		assert state.board[1][1] is None
+
+	def test_restores_a_sequence_of_moves_in_reverse_order(
+		self,
+		game: TicTacToeGame,
+	) -> None:
+		state = game.initial_state()
+		moves = [Move(0, 0), Move(1, 1), Move(0, 1)]
+		undos = [game.make_move(state, move) for move in moves]
+
+		for move, undo in reversed(list(zip(moves, undos))):
 			game.unmake_move(state, move, undo)
 
-		assert state.board == original_state.board
-		assert state.current_player is original_state.current_player
+		assert state == GameState()
 
-	def test_unmake_move_rejects_mismatched_move(self, game, state):
+	def test_restores_a_move_that_ended_the_game(
+		self,
+		game: TicTacToeGame,
+	) -> None:
+		state = game.initial_state()
+		play(game, state, X_WINS_MOVES[:-1])
+
+		move = Move(*X_WINS_MOVES[-1])
+		undo = game.make_move(state, move)
+
+		assert game.is_terminal(state)
+
+		game.unmake_move(state, move, undo)
+
+		assert not game.is_terminal(state)
+		assert state.board[0][2] is None
+
+	def test_random_playouts_unwind_to_the_initial_state(
+		self,
+		game: TicTacToeGame,
+	) -> None:
+		rng = random.Random(1234)
+
+		for _ in range(50):
+			state = game.initial_state()
+			history = []
+
+			while not game.is_terminal(state):
+				move = rng.choice(game.legal_moves(state))
+				history.append((move, game.make_move(state, move)))
+
+			for move, undo in reversed(history):
+				game.unmake_move(state, move, undo)
+
+			assert state == GameState()
+
+	def test_rejects_a_move_that_does_not_match_the_undo_data(
+		self,
+		game: TicTacToeGame,
+	) -> None:
+		state = game.initial_state()
+		undo = game.make_move(state, Move(0, 0))
+
+		with pytest.raises(ValueError, match="does not match undo"):
+			game.unmake_move(state, Move(0, 1), undo)
+
+	@pytest.mark.parametrize("move", [Move(1, 0), Move(0, 1)])
+	def test_rejects_moves_differing_in_a_single_coordinate(
+		self,
+		game: TicTacToeGame,
+		move: Move,
+	) -> None:
+		state = game.initial_state()
+		undo = game.make_move(state, Move(0, 0))
+
+		with pytest.raises(ValueError, match="does not match undo"):
+			game.unmake_move(state, move, undo)
+
+	def test_rejects_an_altered_board(self, game: TicTacToeGame) -> None:
+		state = game.initial_state()
 		move = Move(0, 0)
-		undo_data = game.make_move(state, move)
+		undo = game.make_move(state, move)
+		state.board[0][0] = Player.O
+
+		with pytest.raises(ValueError, match="board state does not match"):
+			game.unmake_move(state, move, undo)
+
+	def test_rejects_an_unexpected_current_player(
+		self,
+		game: TicTacToeGame,
+	) -> None:
+		state = game.initial_state()
+		move = Move(0, 0)
+		undo = game.make_move(state, move)
+		state.current_player = Player.X
+
+		with pytest.raises(ValueError, match="unexpected current player"):
+			game.unmake_move(state, move, undo)
+
+	def test_rejects_undoing_the_same_move_twice(
+		self,
+		game: TicTacToeGame,
+	) -> None:
+		state = game.initial_state()
+		move = Move(0, 0)
+		undo = game.make_move(state, move)
+		game.unmake_move(state, move, undo)
+
+		with pytest.raises(ValueError, match="board state does not match"):
+			game.unmake_move(state, move, undo)
+
+	def test_failed_unmake_leaves_the_state_unchanged(
+		self,
+		game: TicTacToeGame,
+	) -> None:
+		state = game.initial_state()
+		move = Move(0, 0)
+		undo = game.make_move(state, move)
+		state.current_player = Player.X
 
 		with pytest.raises(ValueError):
-			game.unmake_move(state, Move(0, 1), undo_data)
+			game.unmake_move(state, move, undo)
 
-	# Winner detection
+		assert state.board[0][0] is Player.X
 
-	@pytest.mark.parametrize(
-		"moves, expected_winner",
-		[
-			(
-				[(0, 0), (1, 0), (0, 1), (1, 1), (0, 2)],
-				Player.X,
-			),
-			(
-				[(0, 0), (0, 1), (1, 0), (1, 1), (2, 0)],
-				Player.X,
-			),
-			(
-				[(0, 0), (0, 1), (1, 1), (0, 2), (2, 2)],
-				Player.X,
-			),
-			(
-				[(0, 2), (0, 0), (1, 1), (0, 1), (2, 0)],
-				Player.X,
-			),
-		],
-	)
-	def test_detects_x_wins(
+
+class TestWinner:
+	@pytest.mark.parametrize("line", WINNING_LINES)
+	@pytest.mark.parametrize("player", list(Player))
+	def test_detects_every_winning_line_for_each_player(
 		self,
-		game,
-		state,
-		moves,
-		expected_winner,
-	):
-		self.play_moves(game, state, moves)
+		game: TicTacToeGame,
+		line,
+		player: Player,
+	) -> None:
+		state = GameState()
 
-		assert game.winner(state) is expected_winner
+		for row, column in line:
+			state.board[row][column] = player
 
-	def test_detects_o_win(self, game, state):
-		self.play_moves(
-			game,
-			state,
-			[
-				(0, 0), (1, 0),
-				(0, 1), (1, 1),
-				(2, 2), (1, 2),
-			],
-		)
+		assert game.winner(state) is player
+
+	def test_empty_board_has_no_winner(self, game: TicTacToeGame) -> None:
+		assert game.winner(game.initial_state()) is None
+
+	def test_detects_winner_reached_through_play(
+		self,
+		game: TicTacToeGame,
+	) -> None:
+		state = game.initial_state()
+		play(game, state, X_WINS_MOVES)
+
+		assert game.winner(state) is Player.X
+
+	def test_detects_a_win_by_the_second_player(
+		self,
+		game: TicTacToeGame,
+	) -> None:
+		state = game.initial_state()
+		play(game, state, [(0, 0), (1, 0), (0, 1), (1, 1), (2, 2), (1, 2)])
 
 		assert game.winner(state) is Player.O
 
-	def test_winner_returns_none_when_no_winner(self, game, state):
-		assert game.winner(state) is None
+	@pytest.mark.parametrize("rows", [
+		pytest.param(("XX.", "...", "..."), id="two-in-a-row"),
+		pytest.param(("XOX", "...", "..."), id="blocked-row"),
+		pytest.param(("XO.", "XO.", "O.."), id="no-complete-line"),
+		pytest.param(("XXO", "OOX", "XOX"), id="full-board-without-line"),
+		pytest.param(DRAW_ROWS, id="drawn-game"),
+	])
+	def test_returns_none_without_a_complete_line(
+		self,
+		game: TicTacToeGame,
+		make_state,
+		rows,
+	) -> None:
+		assert game.winner(make_state(*rows)) is None
 
-	# Terminal detection
+	def test_line_of_a_single_player_wins_on_a_full_board(
+		self,
+		game: TicTacToeGame,
+		make_state,
+	) -> None:
+		state = make_state("XOX", "OXO", "XOX")
 
-	def test_detects_win_as_terminal(self, game, state):
-		self.play_moves(
-			game,
-			state,
-			[
-				(0, 0), (1, 0),
-				(0, 1), (1, 1),
-				(0, 2),
-			],
-		)
+		assert game.winner(state) is Player.X
+
+	def test_empty_cells_do_not_form_a_winning_line(
+		self,
+		game: TicTacToeGame,
+		make_state,
+	) -> None:
+		assert game.winner(make_state("...", "...", "...")) is None
+
+
+class TestIsTerminal:
+	def test_won_position_is_terminal(self, game: TicTacToeGame) -> None:
+		state = game.initial_state()
+		play(game, state, X_WINS_MOVES)
 
 		assert game.is_terminal(state)
 
-	def test_detects_full_board_draw_as_terminal(self, game, state):
-		self.play_moves(game, state, DRAW_MOVES)
+	def test_full_board_without_a_winner_is_terminal(
+		self,
+		game: TicTacToeGame,
+		make_state,
+	) -> None:
+		assert game.is_terminal(make_state(*DRAW_ROWS))
 
-		assert game.is_terminal(state)
-		assert game.winner(state) is None
+	def test_win_on_the_last_cell_is_terminal(
+		self,
+		game: TicTacToeGame,
+		make_state,
+	) -> None:
+		assert game.is_terminal(make_state("XOX", "OXO", "XOX"))
 
-	# Terminal scoring
+	def test_unfinished_game_is_not_terminal(
+		self,
+		game: TicTacToeGame,
+		make_state,
+	) -> None:
+		assert not game.is_terminal(make_state("XO.", ".X.", "..O"))
 
-	def test_terminal_score_is_positive_for_winner(self, game, state):
-		self.play_moves(
-			game,
-			state,
-			[
-				(0, 0), (1, 0),
-				(0, 1), (1, 1),
-				(0, 2),
-			],
+	def test_board_missing_one_cell_is_not_terminal(
+		self,
+		game: TicTacToeGame,
+		make_state,
+	) -> None:
+		assert not game.is_terminal(make_state("XOX", "OXO", "OX."))
+
+
+class TestTerminalScore:
+	@pytest.fixture
+	def won_state(self, game: TicTacToeGame) -> GameState:
+		state = game.initial_state()
+		play(game, state, X_WINS_MOVES)
+
+		return state
+
+	def test_winner_scores_one(
+		self,
+		game: TicTacToeGame,
+		won_state: GameState,
+	) -> None:
+		assert game.terminal_score(won_state, Player.X) == 1.0
+
+	def test_loser_scores_minus_one(
+		self,
+		game: TicTacToeGame,
+		won_state: GameState,
+	) -> None:
+		assert game.terminal_score(won_state, Player.O) == -1.0
+
+	def test_scores_are_zero_sum(
+		self,
+		game: TicTacToeGame,
+		won_state: GameState,
+	) -> None:
+		assert game.terminal_score(won_state, Player.X) == -game.terminal_score(
+			won_state,
+			Player.O,
 		)
 
-		assert game.terminal_score(state, Player.X) == 1.0
-
-	def test_terminal_score_is_negative_for_loser(self, game, state):
-		self.play_moves(
-			game,
-			state,
-			[
-				(0, 0), (1, 0),
-				(0, 1), (1, 1),
-				(0, 2),
-			],
-		)
-
-		assert game.terminal_score(state, Player.O) == -1.0
-
-	def test_terminal_score_is_zero_for_draw(self, game, state):
-		self.play_moves(game, state, DRAW_MOVES)
+	def test_draw_scores_zero_for_both_players(
+		self,
+		game: TicTacToeGame,
+		make_state,
+	) -> None:
+		state = make_state(*DRAW_ROWS)
 
 		assert game.terminal_score(state, Player.X) == 0.0
 		assert game.terminal_score(state, Player.O) == 0.0
 
-	def test_terminal_score_rejects_nonterminal_position(
+	def test_second_player_win_is_scored_for_o(
 		self,
-		game,
-		state,
-	):
-		with pytest.raises(ValueError):
-			game.terminal_score(state, Player.X)
+		game: TicTacToeGame,
+		make_state,
+	) -> None:
+		state = make_state("OOO", "XX.", "X..")
 
-	# Board display
+		assert game.terminal_score(state, Player.O) == 1.0
+		assert game.terminal_score(state, Player.X) == -1.0
 
-	def test_state_string_contains_board_coordinates(self, state):
-		output = str(state)
+	def test_score_does_not_depend_on_the_player_to_move(
+		self,
+		game: TicTacToeGame,
+		make_state,
+	) -> None:
+		state = make_state("XXX", "OO.", "...", current_player=Player.X)
 
-		assert "0" in output
-		assert "1" in output
-		assert "2" in output
+		assert game.terminal_score(state, Player.X) == 1.0
 
-	def test_state_string_displays_players(self, game, state):
+	@pytest.mark.parametrize("rows", [
+		pytest.param(("...", "...", "..."), id="empty"),
+		pytest.param(("XO.", ".X.", "..O"), id="in-progress"),
+		pytest.param(("XOX", "OXO", "OX."), id="one-cell-left"),
+	])
+	def test_rejects_nonterminal_positions(
+		self,
+		game: TicTacToeGame,
+		make_state,
+		rows,
+	) -> None:
+		with pytest.raises(ValueError, match="nonterminal"):
+			game.terminal_score(make_state(*rows), Player.X)
+
+
+class TestDisplay:
+	def test_prints_the_state(self, game: TicTacToeGame, capsys) -> None:
+		state = game.initial_state()
 		game.make_move(state, Move(1, 1))
 
-		output = str(state)
+		game.display(state)
 
-		assert "X" in output
-		assert "Current player: O" in output
-
+		assert capsys.readouterr().out == str(state) + "\n"
