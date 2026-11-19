@@ -338,3 +338,232 @@ class TestClear:
 		tracker.register_dependency("other", "child")
 
 		assert tracker.get_ancestors("child") == {"other"}
+
+
+class TestRelations:
+	def test_dependency_has_no_relation_by_default(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		tracker.register_dependency("parent", "child")
+
+		assert tracker.get_children("parent") == {"child": None}
+
+	def test_stores_the_relation_of_a_dependency(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		tracker.register_dependency("parent", "child", -1)
+
+		assert tracker.get_children("parent") == {"child": -1}
+
+	def test_registering_again_replaces_the_relation(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		tracker.register_dependency("parent", "child", 1)
+		tracker.register_dependency("parent", "child", -1)
+
+		assert tracker.get_children("parent") == {"child": -1}
+
+	def test_replace_dependencies_accepts_a_mapping_with_relations(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		tracker.replace_dependencies("parent", {"first": 1, "second": -1})
+
+		assert tracker.get_children("parent") == {"first": 1, "second": -1}
+		assert tracker.get_ancestors("second") == {"parent"}
+
+	def test_replace_dependencies_with_keys_leaves_relations_unknown(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		tracker.replace_dependencies("parent", ["first", "second"])
+
+		assert tracker.get_children("parent") == {"first": None, "second": None}
+
+	def test_replacing_drops_old_relations(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		tracker.replace_dependencies("parent", {"old": 1})
+		tracker.replace_dependencies("parent", {"new": -1})
+
+		assert tracker.get_children("parent") == {"new": -1}
+
+
+class TestGetChildren:
+	def test_unknown_parent_has_no_children(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		assert tracker.get_children("missing") == {}
+
+	def test_returns_only_direct_children(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		tracker.register_dependency("root", "middle")
+		tracker.register_dependency("middle", "leaf")
+
+		assert set(tracker.get_children("root")) == {"middle"}
+
+	def test_returned_mapping_is_a_copy(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		tracker.register_dependency("parent", "child", 1)
+
+		tracker.get_children("parent")["intruder"] = 1
+
+		assert tracker.get_children("parent") == {"child": 1}
+
+	def test_removed_children_are_not_reported(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		tracker.register_dependency("parent", "child")
+
+		tracker.remove_dependencies("parent")
+
+		assert tracker.get_children("parent") == {}
+
+	def test_cleared_children_are_not_reported(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		tracker.register_dependency("parent", "child")
+
+		tracker.clear()
+
+		assert tracker.get_children("parent") == {}
+
+
+class TestGetUpdateOrder:
+	def test_unknown_key_has_nothing_to_update(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		assert tracker.get_update_order("missing") == []
+
+	def test_excludes_the_changed_key(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		tracker.register_dependency("parent", "child")
+
+		assert tracker.get_update_order("child") == ["parent"]
+
+	def test_chain_is_ordered_from_nearest_to_furthest_ancestor(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		tracker.register_dependency("great", "grand")
+		tracker.register_dependency("grand", "parent")
+		tracker.register_dependency("parent", "child")
+
+		assert tracker.get_update_order("child") == [
+			"parent",
+			"grand",
+			"great",
+		]
+
+	def test_contains_exactly_the_ancestors(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		tracker.register_dependency("top", "left")
+		tracker.register_dependency("top", "right")
+		tracker.register_dependency("left", "bottom")
+		tracker.register_dependency("right", "bottom")
+		tracker.register_dependency("bottom", "leaf")
+		tracker.register_dependency("unrelated", "other")
+
+		order = tracker.get_update_order("leaf")
+
+		assert sorted(order) == sorted(tracker.get_ancestors("leaf"))
+		assert len(order) == len(set(order))
+
+	def test_every_position_follows_the_positions_it_depends_on(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		edges = [
+			("top", "left"),
+			("top", "right"),
+			("top", "bottom"),
+			("left", "bottom"),
+			("right", "bottom"),
+			("right", "side"),
+			("side", "bottom"),
+			("bottom", "leaf"),
+		]
+
+		for parent, child in edges:
+			tracker.register_dependency(parent, child)
+
+		order = tracker.get_update_order("leaf")
+		position = {key: index for index, key in enumerate(order)}
+
+		for parent, child in edges:
+			if child in position:
+				assert position[child] < position[parent]
+
+	def test_diamond_is_ordered_before_its_top(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		tracker.register_dependency("top", "left")
+		tracker.register_dependency("top", "right")
+		tracker.register_dependency("left", "bottom")
+		tracker.register_dependency("right", "bottom")
+
+		order = tracker.get_update_order("bottom")
+
+		assert order[-1] == "top"
+		assert set(order[:2]) == {"left", "right"}
+
+	def test_terminates_on_cycles_and_lists_each_position_once(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		tracker.register_dependency("a", "b")
+		tracker.register_dependency("b", "c")
+		tracker.register_dependency("c", "a")
+
+		order = tracker.get_update_order("a")
+
+		assert sorted(order) == ["b", "c"]
+
+	def test_self_dependency_does_not_list_the_key(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		tracker.register_dependency("loop", "loop")
+
+		assert tracker.get_update_order("loop") == []
+
+	def test_handles_deep_chains_without_recursion_errors(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		depth = 20_000
+
+		for index in range(depth):
+			tracker.register_dependency(index, index + 1)
+
+		order = tracker.get_update_order(depth)
+
+		assert order == list(range(depth - 1, -1, -1))
+
+	def test_does_not_modify_the_tracker(
+		self,
+		tracker: SearchDependencyTracker,
+	) -> None:
+		tracker.register_dependency("parent", "child", 1)
+
+		tracker.get_update_order("child")
+
+		assert tracker.get_children("parent") == {"child": 1}
+		assert tracker.get_ancestors("child") == {"parent"}

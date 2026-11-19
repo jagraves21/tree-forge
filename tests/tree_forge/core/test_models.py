@@ -268,44 +268,67 @@ class TestSearchConfig:
 			config.beam_width = 2
 
 
-class TestSearchStatistics:
-	def test_default_values(self) -> None:
-		statistics = SearchStatistics()
+STATISTIC_NAMES = [
+	"nodes_visited",
+	"leaf_nodes",
+	"terminal_nodes",
+	"cutoffs",
+	"transposition_table_hits",
+	"transposition_table_stores",
+	"transposition_table_invalidations",
+	"transposition_table_refreshes",
+	"iterations_completed",
+	"elapsed_time_seconds",
+	"completed_depth",
+	"max_ply_reached",
+]
 
-		assert statistics.nodes_visited == 0
-		assert statistics.leaf_nodes == 0
-		assert statistics.terminal_nodes == 0
-		assert statistics.cutoffs == 0
-		assert statistics.transposition_table_hits == 0
-		assert statistics.transposition_table_stores == 0
-		assert statistics.transposition_table_invalidations == 0
-		assert statistics.iterations_completed == 0
-		assert statistics.elapsed_time_seconds == 0.0
-		assert statistics.completed_depth == 0
-		assert statistics.max_ply_reached == 0
+COUNTER_NAMES = [
+	"nodes_visited",
+	"leaf_nodes",
+	"terminal_nodes",
+	"cutoffs",
+	"transposition_table_hits",
+	"transposition_table_stores",
+	"transposition_table_invalidations",
+	"transposition_table_refreshes",
+	"iterations_completed",
+]
+
+
+class TestSearchStatistics:
+	@pytest.mark.parametrize("name", STATISTIC_NAMES)
+	def test_nothing_is_measured_by_default(self, name: str) -> None:
+		# A statistic that was not measured is None, never zero.
+		assert getattr(SearchStatistics(), name) is None
 
 	def test_accepts_initial_values(self) -> None:
 		statistics = SearchStatistics(nodes_visited=12, cutoffs=3)
 
 		assert statistics.nodes_visited == 12
 		assert statistics.cutoffs == 3
-		assert statistics.leaf_nodes == 0
+		assert statistics.leaf_nodes is None
+
+	def test_zero_is_kept_distinct_from_not_measured(self) -> None:
+		statistics = SearchStatistics(cutoffs=0)
+
+		assert statistics.cutoffs == 0
+		assert statistics.cutoffs is not None
+		assert statistics.leaf_nodes is None
 
 	def test_counters_can_be_updated(self) -> None:
-		statistics = SearchStatistics()
+		statistics = SearchStatistics(nodes_visited=0)
 
 		statistics.nodes_visited += 5
 		statistics.nodes_visited += 2
-		statistics.transposition_table_invalidations += 1
 		statistics.max_ply_reached = 7
 
 		assert statistics.nodes_visited == 7
-		assert statistics.transposition_table_invalidations == 1
 		assert statistics.max_ply_reached == 7
 
 	def test_instances_do_not_share_state(self) -> None:
-		first = SearchStatistics()
-		second = SearchStatistics()
+		first = SearchStatistics(nodes_visited=0)
+		second = SearchStatistics(nodes_visited=0)
 
 		first.nodes_visited = 10
 
@@ -318,6 +341,96 @@ class TestSearchStatistics:
 		assert SearchStatistics(nodes_visited=3) != SearchStatistics(
 			nodes_visited=4
 		)
+		assert SearchStatistics(cutoffs=0) != SearchStatistics()
+
+
+class TestSearchStatisticsMerge:
+	def test_adds_counters(self) -> None:
+		combined = SearchStatistics(nodes_visited=3, cutoffs=1).merge(
+			SearchStatistics(nodes_visited=4, cutoffs=0)
+		)
+
+		assert combined.nodes_visited == 7
+		assert combined.cutoffs == 1
+
+	def test_adds_elapsed_time(self) -> None:
+		combined = SearchStatistics(elapsed_time_seconds=0.25).merge(
+			SearchStatistics(elapsed_time_seconds=0.5)
+		)
+
+		assert combined.elapsed_time_seconds == 0.75
+
+	@pytest.mark.parametrize("name", ["completed_depth", "max_ply_reached"])
+	def test_keeps_the_deepest_value(self, name: str) -> None:
+		combined = SearchStatistics(**{name: 3}).merge(
+			SearchStatistics(**{name: 5})
+		)
+
+		assert getattr(combined, name) == 5
+		assert getattr(
+			SearchStatistics(**{name: 5}).merge(SearchStatistics(**{name: 3})),
+			name,
+		) == 5
+
+	@pytest.mark.parametrize("name", STATISTIC_NAMES)
+	def test_statistic_unmeasured_by_both_stays_unmeasured(
+		self,
+		name: str,
+	) -> None:
+		combined = SearchStatistics().merge(SearchStatistics())
+
+		assert getattr(combined, name) is None
+
+	@pytest.mark.parametrize("name", COUNTER_NAMES)
+	def test_unmeasured_value_does_not_become_zero(self, name: str) -> None:
+		measured = SearchStatistics(**{name: 4})
+
+		assert getattr(measured.merge(SearchStatistics()), name) == 4
+		assert getattr(SearchStatistics().merge(measured), name) == 4
+
+	def test_measured_zero_is_preserved(self) -> None:
+		combined = SearchStatistics(cutoffs=0).merge(SearchStatistics())
+
+		assert combined.cutoffs == 0
+
+	def test_a_search_without_alpha_beta_does_not_hide_the_other(
+		self,
+	) -> None:
+		plain = SearchStatistics(nodes_visited=10, cutoffs=None)
+		pruned = SearchStatistics(nodes_visited=6, cutoffs=2)
+
+		combined = plain.merge(pruned)
+
+		assert combined.nodes_visited == 16
+		assert combined.cutoffs == 2
+
+	def test_does_not_modify_either_operand(self) -> None:
+		first = SearchStatistics(nodes_visited=1)
+		second = SearchStatistics(nodes_visited=2)
+
+		first.merge(second)
+
+		assert first.nodes_visited == 1
+		assert second.nodes_visited == 2
+
+	def test_is_commutative_and_associative(self) -> None:
+		a = SearchStatistics(nodes_visited=1, cutoffs=None, max_ply_reached=2)
+		b = SearchStatistics(nodes_visited=2, cutoffs=3, max_ply_reached=1)
+		c = SearchStatistics(nodes_visited=4, cutoffs=0, max_ply_reached=5)
+
+		assert a.merge(b) == b.merge(a)
+		assert a.merge(b).merge(c) == a.merge(b.merge(c))
+
+	def test_empty_statistics_are_the_identity(self) -> None:
+		statistics = SearchStatistics(
+			nodes_visited=5,
+			cutoffs=0,
+			completed_depth=3,
+			elapsed_time_seconds=0.5,
+		)
+
+		assert statistics.merge(SearchStatistics()) == statistics
+		assert SearchStatistics().merge(statistics) == statistics
 
 
 class TestSearchStatisticsString:
@@ -331,6 +444,7 @@ class TestSearchStatisticsString:
 			transposition_table_hits=78,
 			transposition_table_stores=9_000,
 			transposition_table_invalidations=4,
+			transposition_table_refreshes=6,
 			iterations_completed=5,
 			elapsed_time_seconds=0.25,
 			completed_depth=6,
@@ -353,8 +467,8 @@ class TestSearchStatisticsString:
 	) -> None:
 		lines = str(populated).splitlines()
 
-		# Title, two rules, and eleven statistics.
-		assert len(lines) == 14
+		# Title, two rules, and twelve statistics.
+		assert len(lines) == 15
 		assert set(parse_report(str(populated))) == {
 			"Nodes visited",
 			"Leaf nodes",
@@ -363,6 +477,7 @@ class TestSearchStatisticsString:
 			"Transposition hits",
 			"Transposition stores",
 			"Transposition invalidations",
+			"Transposition refreshes",
 			"Search time",
 			"Completed depth",
 			"Iterations completed",
@@ -375,6 +490,7 @@ class TestSearchStatisticsString:
 		assert report["Leaf nodes"] == "890"
 		assert report["Terminal nodes"] == "12"
 		assert report["Transposition invalidations"] == "4"
+		assert report["Transposition refreshes"] == "6"
 		assert report["Completed depth"] == "6"
 		assert report["Iterations completed"] == "5"
 		assert report["Maximum ply reached"] == "8"
@@ -395,11 +511,21 @@ class TestSearchStatisticsString:
 	) -> None:
 		assert parse_report(str(populated))["Search time"] == "0.250000s"
 
-	def test_default_statistics_report_zeros(self) -> None:
+	def test_unmeasured_statistics_are_reported_as_not_available(
+		self,
+	) -> None:
 		report = parse_report(str(SearchStatistics()))
+
+		assert set(report.values()) == {"n/a"}
+
+	def test_measured_zero_is_not_reported_as_not_available(self) -> None:
+		report = parse_report(
+			str(SearchStatistics(nodes_visited=0, elapsed_time_seconds=0.0))
+		)
 
 		assert report["Nodes visited"] == "0"
 		assert report["Search time"] == "0.000000s"
+		assert report["Leaf nodes"] == "n/a"
 
 
 class TestSearchResult:
@@ -434,6 +560,14 @@ class TestSearchResult:
 
 		assert result.best_move is None
 
+	def test_score_can_be_unavailable(self) -> None:
+		result = SearchResult[int](best_move=1, score=None)
+
+		assert result.score is None
+
+	def test_zero_score_is_not_unavailable(self) -> None:
+		assert SearchResult[int](best_move=1, score=0.0).score == 0.0
+
 	def test_default_statistics_are_created_per_instance(self) -> None:
 		first = SearchResult[int](best_move=1, score=1.0)
 		second = SearchResult[int](best_move=2, score=2.0)
@@ -459,6 +593,11 @@ class TestSearchResult:
 		)
 
 		assert result.completed_depth == 5
+
+	def test_completed_depth_is_none_when_not_applicable(self) -> None:
+		result = SearchResult[int](best_move=2, score=1.0)
+
+		assert result.completed_depth is None
 
 	def test_completed_depth_tracks_later_statistics_changes(self) -> None:
 		result = SearchResult[int](best_move=2, score=1.0)
@@ -505,6 +644,24 @@ class TestSearchResultString:
 		report = parse_report(str(SearchResult[int](best_move=1, score=score)))
 
 		assert report["Score"] == expected
+
+	def test_reports_unavailable_score(self) -> None:
+		report = parse_report(str(SearchResult[int](best_move=1, score=None)))
+
+		assert report["Score"] == "n/a"
+
+	@pytest.mark.parametrize("reason", list(SearchTerminationReason))
+	def test_reports_the_termination_reason_by_name(
+		self,
+		reason: SearchTerminationReason,
+	) -> None:
+		result = SearchResult[int](
+			best_move=1,
+			score=0.0,
+			termination_reason=reason,
+		)
+
+		assert parse_report(str(result))["Termination reason"] == reason.name
 
 	def test_reports_incomplete_search(self) -> None:
 		result = SearchResult[int](

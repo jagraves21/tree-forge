@@ -167,7 +167,6 @@ class TestEvaluate:
 
 class TestEvaluateOverPlayedPositions:
 	@pytest.fixture(scope="class")
-	@classmethod
 	def open_positions(self) -> list[GameState]:
 		"""Non-terminal positions from seeded random playouts."""
 		game = ConnectFourGame()

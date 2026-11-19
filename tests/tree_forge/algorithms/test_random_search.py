@@ -82,12 +82,12 @@ class TestRandomSearchSearch:
 
 		assert result.best_move == TreeMove("only")
 
-	def test_score_is_always_zero(
+	def test_has_no_score_because_positions_are_not_evaluated(
 		self,
 		search: RandomSearch,
 		game: TreeGame,
 	) -> None:
-		assert search.search(game.initial_state()).score == 0.0
+		assert search.search(game.initial_state()).score is None
 
 	def test_reports_a_completed_search(
 		self,
@@ -107,6 +107,29 @@ class TestRandomSearchSearch:
 		statistics = search.search(game.initial_state()).statistics
 
 		assert statistics == SearchStatistics(nodes_visited=1)
+
+	@pytest.mark.parametrize("name", [
+		"leaf_nodes",
+		"terminal_nodes",
+		"cutoffs",
+		"transposition_table_hits",
+		"transposition_table_stores",
+		"transposition_table_invalidations",
+		"transposition_table_refreshes",
+		"iterations_completed",
+		"elapsed_time_seconds",
+		"completed_depth",
+		"max_ply_reached",
+	])
+	def test_statistics_that_are_not_measured_are_none(
+		self,
+		search: RandomSearch,
+		game: TreeGame,
+		name: str,
+	) -> None:
+		statistics = search.search(game.initial_state()).statistics
+
+		assert getattr(statistics, name) is None
 
 	def test_each_search_gets_fresh_statistics(
 		self,
@@ -158,16 +181,16 @@ class TestRandomSearchWithoutLegalMoves:
 		result = RandomSearch(game).search(game.initial_state())
 
 		assert result.best_move is None
-		assert result.score == 0.0
+		assert result.score is None
 		assert result.completed is True
 		assert result.termination_reason is SearchTerminationReason.COMPLETED
 
-	def test_records_no_visited_nodes(self) -> None:
+	def test_still_records_the_inspected_position(self) -> None:
 		game = TreeGame({}, {})
 
 		result = RandomSearch(game).search(game.initial_state())
 
-		assert result.statistics.nodes_visited == 0
+		assert result.statistics.nodes_visited == 1
 
 	def test_does_not_consult_random_choice(self) -> None:
 		game = TreeGame(SHALLOW_TREE, SHALLOW_SCORES)

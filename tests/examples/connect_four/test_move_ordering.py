@@ -208,6 +208,18 @@ class TestConnectFourMoveOrdering:
 	) -> None:
 		assert ordering.order_moves(game.initial_state(), [], Player.RED) == []
 
+	@pytest.mark.xfail(strict=True, reason=BLOCKING_REASON)
+	def test_blocking_move_is_prioritized(
+		self,
+		ordering: ConnectFourMoveOrdering,
+		play,
+	) -> None:
+		state = play(YELLOW_THREATENS_THREE)
+
+		ordered = ordering.order_moves(state, ALL_MOVES, Player.RED)
+
+		assert ordered[0] == Move(3)
+
 
 class TestRandomConnectFourMoveOrdering:
 	def test_stores_game_and_supplied_random_source(
@@ -379,3 +391,16 @@ class TestRandomConnectFourMoveOrdering:
 		ordering = RandomConnectFourMoveOrdering(game, random.Random(0))
 
 		assert ordering.order_moves(game.initial_state(), [], Player.RED) == []
+
+	@pytest.mark.xfail(strict=True, reason=BLOCKING_REASON)
+	def test_blocking_move_is_prioritized(
+		self,
+		game: ConnectFourGame,
+		play,
+	) -> None:
+		ordering = RandomConnectFourMoveOrdering(game, IdentityShuffle())
+		state = play(YELLOW_THREATENS_THREE)
+
+		ordered = ordering.order_moves(state, ALL_MOVES, Player.RED)
+
+		assert ordered[0] == Move(3)

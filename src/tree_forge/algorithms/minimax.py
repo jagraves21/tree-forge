@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Hashable, Sequence
 from math import inf
 from time import perf_counter
-from typing import Generic, TypeVar
+from typing import Generic, NamedTuple, TypeVar
 
 from ..caching import (
-	TranspositionBound,
 	TranspositionEntry,
 	TranspositionTable,
 )
@@ -28,8 +27,70 @@ PlayerT = TypeVar("PlayerT")
 UndoT = TypeVar("UndoT")
 
 
+def negated(score: float) -> float:
+	"""Return the opposite score, without producing a negative zero."""
+	return -score + 0.0
+
+
+class _Node(NamedTuple):
+	"""Outcome of searching one position."""
+
+	score: float
+	solved: bool
+	best_move: object | None
+
+
+class _Counters:
+	"""Mutable counters collected while a search runs."""
+
+	__slots__ = (
+		"nodes",
+		"leaves",
+		"terminals",
+		"cutoffs",
+		"hits",
+		"stores",
+		"invalidations",
+		"refreshes",
+		"max_ply",
+	)
+
+	def __init__(self) -> None:
+		self.nodes = 0
+		self.leaves = 0
+		self.terminals = 0
+		self.cutoffs = 0
+		self.hits = 0
+		self.stores = 0
+		self.invalidations = 0
+		self.refreshes = 0
+		self.max_ply = 0
+
+
 class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
-	"""Minimax search with optional alpha-beta pruning and caching."""
+	"""Minimax search with optional alpha-beta pruning and caching.
+
+	Scores are from the perspective of the player to move at the
+	root. Terminal positions are scored by the game, and positions at
+	the depth limit by the evaluator (or 0 without one).
+
+	With a canonicalizer, every searched position, including the
+	root, is cached in a transposition table as an interval of
+	possible values. Cached information about a position is reused
+	when it was gathered with at least the requested depth, or when
+	it is proven (solved). The table must belong to a single game and
+	evaluator, and the evaluator is assumed to be zero-sum, so that
+	scores can be stored from the perspective of the player to move.
+
+	When the table tracks dependencies, every position registers all
+	of its legal continuations as dependencies, searched or not.
+	Information discovered by later searches therefore improves the
+	cached values of positions that were searched earlier, as
+	described in TranspositionTable.
+
+	Statistics that are not measured, such as cutoffs without
+	alpha-beta pruning or table statistics without a table, are None.
+	"""
 
 	def __init__(
 		self,
@@ -66,9 +127,14 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 	def search(self, state: StateT) -> SearchResult[MoveT]:
 		"""Find the best move for the current player."""
 		start_time = perf_counter()
-		statistics = SearchStatistics()
+		counters = _Counters()
+
+		table = self.transposition_table
+		canonicalizer = self.canonicalizer
+		tracking = table is not None and table.dependency_tracking
 
 		root_player = self.game.current_player(state)
+		root_depth = self.limits.max_depth
 
 		def evaluate_position() -> float:
 			if self.evaluator is None:
@@ -76,76 +142,112 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 
 			return self.evaluator.evaluate(state, root_player)
 
-		def update_dependencies(
-			canonical_position,
-			child_keys: set,
-			preserve_existing: bool = False,
-		) -> None:
-			if (
-				self.transposition_table is None
-				or canonical_position is None
-			):
-				return
+		def to_root_interval(
+			entry: TranspositionEntry[MoveT],
+			maximizing: bool,
+		) -> tuple[float | None, float | None]:
+			"""Convert a stored interval to the root player's perspective."""
+			if maximizing:
+				return entry.lower, entry.upper
 
-			if preserve_existing:
-				for child_key in child_keys:
-					self.transposition_table.register_dependency(
-						canonical_position.key,
-						child_key,
-					)
-			else:
-				self.transposition_table.replace_dependencies(
-					canonical_position.key,
-					child_keys,
-				)
+			# Negating a score swaps its bounds.
+			return (
+				None if entry.upper is None else negated(entry.upper),
+				None if entry.lower is None else negated(entry.lower),
+			)
+
+		def record(outcome) -> None:
+			"""Count the stale and recomputed entries reported by the table."""
+			counters.invalidations += outcome.invalidated or 0
+			counters.refreshes += outcome.refreshed or 0
 
 		def store_entry(
-			canonical_position,
+			position,
 			depth: int | None,
-			score: float,
-			bound: TranspositionBound,
+			lower: float | None,
+			upper: float | None,
 			best_move: MoveT | None,
 			maximizing: bool,
 			solved: bool,
-		) -> None:
-			if (
-				self.transposition_table is None
-				or canonical_position is None
-			):
-				return
+		) -> bool:
+			"""Store what is known about a position, from the root's view.
+
+			Returns whether the table changed.
+			"""
+			if table is None or position is None:
+				return False
 
 			# Store scores from the perspective of the player
 			# whose turn it is at this position.
-			stored_score = score if maximizing else -score
-
-			stored_bound = bound
-
-			# Negating a score reverses its bound.
 			if not maximizing:
-				if bound == TranspositionBound.LOWER:
-					stored_bound = TranspositionBound.UPPER
-				elif bound == TranspositionBound.UPPER:
-					stored_bound = TranspositionBound.LOWER
+				lower, upper = (
+					None if upper is None else negated(upper),
+					None if lower is None else negated(lower),
+				)
 
-			stored_move = (
-				canonical_position.to_canonical_move(best_move)
-				if best_move is not None
-				else None
-			)
-
-			invalidated = self.transposition_table.store(
+			outcome = table.store(
 				TranspositionEntry(
-					key=canonical_position.key,
+					key=position.key,
 					depth=depth,
-					score=stored_score,
-					bound=stored_bound,
-					best_move=stored_move,
+					lower=lower,
+					upper=upper,
+					best_move=(
+						position.to_canonical_move(best_move)
+						if best_move is not None
+						else None
+					),
 					solved=solved,
 				)
 			)
 
-			statistics.transposition_table_invalidations += invalidated
-			statistics.transposition_table_stores += 1
+			if outcome.stored:
+				counters.stores += 1
+
+			record(outcome)
+
+			return outcome.stored
+
+		def finish_leaf(
+			position,
+			depth: int | None,
+			score: float,
+			maximizing: bool,
+			solved: bool,
+		) -> None:
+			"""Record a position that is not expanded."""
+			stored = store_entry(
+				position,
+				depth,
+				score,
+				score,
+				None,
+				maximizing,
+				solved,
+			)
+
+			# The position may have been expanded by an earlier search. Its
+			# dependencies only go away if this entry replaced that result;
+			# a deeper result that was kept still depends on its children.
+			if stored and table is not None and position is not None:
+				record(table.replace_dependencies(position.key, {}))
+
+		def continuation(maximizing: bool):
+			"""Describe the current position as a continuation of its parent.
+
+			Returns its canonical position and relation: +1 if its score
+			has the same perspective as the parent's, -1 if the
+			perspective is opposite.
+			"""
+			assert canonicalizer is not None
+
+			child_maximizing = (
+				self.game.current_player(state) == root_player
+			)
+
+			return (
+				canonicalizer.canonicalize(state),
+				1 if child_maximizing == maximizing else -1,
+			)
 
 		def order_moves(
 			position_state: StateT,
@@ -190,126 +292,88 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 			ply: int,
 			alpha: float,
 			beta: float,
-		) -> tuple[float, bool]:
-			"""Return the score and whether it is horizon-independent."""
-			statistics.nodes_visited += 1
-			statistics.max_ply_reached = max(
-				statistics.max_ply_reached,
-				ply,
-			)
+			position=None,
+		) -> _Node:
+			"""Search a position.
+
+			The score is from the root player's perspective. It is exact
+			if it lies strictly between alpha and beta, and otherwise a
+			bound. It is solved if it is proven independently of the
+			depth limit.
+			"""
+			counters.nodes += 1
+			counters.max_ply = max(counters.max_ply, ply)
 
 			player = self.game.current_player(state)
 			maximizing = player == root_player
 
-			# Preserve the original search window for bound classification.
-			original_alpha = alpha
-			original_beta = beta
-
-			canonical_position = None
 			cached_move = None
-			used_cached_bound = False
 
-			# Look up the current position.
-			if self.transposition_table is not None:
-				assert self.canonicalizer is not None
+			# Look up the current position. Its canonical position is
+			# reused if the caller already computed it.
+			if table is not None:
+				assert canonicalizer is not None
 
-				canonical_position = self.canonicalizer.canonicalize(
-					state
-				)
+				if position is None:
+					position = canonicalizer.canonicalize(state)
 
-				entry = self.transposition_table.get(
-					canonical_position.key
-				)
+				entry = table.get(position.key)
 
 				if entry is not None:
-					statistics.transposition_table_hits += 1
+					counters.hits += 1
 
 					if entry.best_move is not None:
-						cached_move = (
-							canonical_position.from_canonical_move(
-								entry.best_move
-							)
+						cached_move = position.from_canonical_move(
+							entry.best_move
 						)
 
-					if entry.is_usable_for_depth(depth):
-						score = (
-							entry.score
-							if maximizing
-							else -entry.score
-						)
+					# The root is always searched, because a move is required.
+					if ply > 0 and entry.is_usable_for_depth(depth):
+						lower, upper = to_root_interval(entry, maximizing)
 
-						bound = entry.bound
-
-						# Negating the score also reverses its bound.
-						if not maximizing:
-							if bound == TranspositionBound.LOWER:
-								bound = TranspositionBound.UPPER
-							elif bound == TranspositionBound.UPPER:
-								bound = TranspositionBound.LOWER
-
-						if bound == TranspositionBound.EXACT:
-							return score, entry.solved
+						if lower is not None and lower == upper:
+							return _Node(lower, entry.solved, None)
 
 						if self.alpha_beta:
-							if bound == TranspositionBound.LOWER:
-								alpha = max(alpha, score)
-							elif bound == TranspositionBound.UPPER:
-								beta = min(beta, score)
+							if lower is not None and lower >= beta:
+								counters.cutoffs += 1
 
-							if alpha >= beta:
-								statistics.cutoffs += 1
-								return score, False
+								return _Node(lower, False, None)
 
-							used_cached_bound = True
+							if upper is not None and upper <= alpha:
+								counters.cutoffs += 1
+
+								return _Node(upper, False, None)
+
+							if lower is not None:
+								alpha = max(alpha, lower)
+
+							if upper is not None:
+								beta = min(beta, upper)
+
+			# Bounds are classified against the window actually searched.
+			window_alpha = alpha
+			window_beta = beta
 
 			# Handle terminal positions.
 			if self.game.is_terminal(state):
-				statistics.leaf_nodes += 1
-				statistics.terminal_nodes += 1
+				counters.leaves += 1
+				counters.terminals += 1
 
-				score = self.game.terminal_score(
-					state,
-					root_player,
-				)
+				score = self.game.terminal_score(state, root_player)
 
-				update_dependencies(
-					canonical_position,
-					set(),
-				)
+				finish_leaf(position, depth, score, maximizing, True)
 
-				store_entry(
-					canonical_position,
-					depth,
-					score,
-					TranspositionBound.EXACT,
-					None,
-					maximizing,
-					True,
-				)
-
-				return score, True
+				return _Node(score, True, None)
 
 			# Handle depth-limited positions.
 			if depth == 0:
-				statistics.leaf_nodes += 1
+				counters.leaves += 1
 				score = evaluate_position()
 
-				update_dependencies(
-					canonical_position,
-					set(),
-				)
+				finish_leaf(position, depth, score, maximizing, False)
 
-				store_entry(
-					canonical_position,
-					depth,
-					score,
-					TranspositionBound.EXACT,
-					None,
-					maximizing,
-					False,
-				)
-
-				return score, False
+				return _Node(score, False, None)
 
 			moves = order_moves(
 				state,
@@ -319,25 +383,12 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 
 			# Handle positions without legal moves.
 			if not moves:
-				statistics.leaf_nodes += 1
+				counters.leaves += 1
 				score = evaluate_position()
 
-				update_dependencies(
-					canonical_position,
-					set(),
-				)
+				finish_leaf(position, depth, score, maximizing, False)
 
-				store_entry(
-					canonical_position,
-					depth,
-					score,
-					TranspositionBound.EXACT,
-					None,
-					maximizing,
-					False,
-				)
-
-				return score, False
+				return _Node(score, False, None)
 
 			# Search the cached best move first when it is legal.
 			if cached_move in moves:
@@ -348,38 +399,29 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 			best_move = None
 			all_children_solved = True
 			cutoff_occurred = False
-			searched_child_keys = set()
+			continuations: dict[Hashable, int] = {}
+			searched = 0
 
-			next_depth = (
-				depth - 1
-				if depth is not None
-				else None
-			)
+			next_depth = depth - 1 if depth is not None else None
 
 			for move in moves:
 				undo_data = self.game.make_move(state, move)
+				searched += 1
 
 				try:
-					child_canonical_position = None
+					child_position = None
 
-					if self.transposition_table is not None:
-						assert self.canonicalizer is not None
+					if tracking:
+						child_position, relation = continuation(maximizing)
+						continuations[child_position.key] = relation
 
-						child_canonical_position = (
-							self.canonicalizer.canonicalize(state)
-						)
-
-					score, child_solved = minimax(
+					score, child_solved, _ = minimax(
 						next_depth,
 						ply + 1,
 						alpha,
 						beta,
+						child_position,
 					)
-
-					if child_canonical_position is not None:
-						searched_child_keys.add(
-							child_canonical_position.key
-						)
 				finally:
 					self.game.unmake_move(
 						state,
@@ -406,9 +448,28 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 						beta = min(beta, best_score)
 
 				if self.alpha_beta and alpha >= beta:
-					statistics.cutoffs += 1
+					counters.cutoffs += 1
 					cutoff_occurred = True
 					break
+
+			# The result also depends on the continuations that were not
+			# searched: information about them may arrive from later
+			# searches, so they are dependencies as well.
+			if tracking and position is not None:
+				for move in moves[searched:]:
+					undo_data = self.game.make_move(state, move)
+
+					try:
+						child_position, relation = continuation(maximizing)
+						continuations[child_position.key] = relation
+					finally:
+						self.game.unmake_move(
+							state,
+							move,
+							undo_data,
+						)
+
+				continuations.pop(position.key, None)
 
 			# A node is solved only when every legal continuation
 			# was searched and every child was independently solved.
@@ -416,122 +477,62 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 
 			# Fully solved children establish an exact result regardless
 			# of the alpha-beta window used to reach this node.
-			bound = TranspositionBound.EXACT
+			if solved:
+				lower, upper = best_score, best_score
+			elif best_score <= window_alpha:
+				lower, upper = None, best_score
+			elif best_score >= window_beta:
+				lower, upper = best_score, None
+			else:
+				lower, upper = best_score, best_score
 
-			if not solved:
-				if best_score <= original_alpha:
-					bound = TranspositionBound.UPPER
-				elif best_score >= original_beta:
-					bound = TranspositionBound.LOWER
-
-			# If a cached bound contributed to this search, retain
-			# its existing dependencies and add the newly searched
-			# children. Otherwise, replace the old dependency set.
-			update_dependencies(
-				canonical_position,
-				searched_child_keys,
-				preserve_existing=used_cached_bound,
-			)
-
-			store_entry(
-				canonical_position,
+			stored = store_entry(
+				position,
 				depth,
-				best_score,
-				bound,
+				lower,
+				upper,
 				best_move,
 				maximizing,
 				solved,
 			)
 
-			return best_score, solved
+			# Dependencies describe the entry that is kept: if a deeper
+			# result for this position was kept instead, its dependencies
+			# stay as they are.
+			if stored and tracking and position is not None:
+				assert table is not None
+				record(table.replace_dependencies(position.key, continuations))
 
-		# Handle terminal root positions.
-		if self.game.is_terminal(state):
-			statistics.nodes_visited = 1
-			statistics.leaf_nodes = 1
-			statistics.terminal_nodes = 1
+			return _Node(best_score, solved, best_move)
 
-			score = self.game.terminal_score(state, root_player)
+		result = minimax(root_depth, 0, -inf, inf)
 
-			statistics.elapsed_time_seconds = (
-				perf_counter() - start_time
-			)
-
-			return SearchResult(
-				best_move=None,
-				score=score,
-				statistics=statistics,
-				termination_reason=SearchTerminationReason.COMPLETED,
-			)
-
-		moves = order_moves(
-			state,
-			self.game.legal_moves(state),
-			root_player,
-		)
-
-		# Handle positions without legal moves.
-		if not moves:
-			statistics.nodes_visited = 1
-			statistics.leaf_nodes = 1
-
-			score = evaluate_position()
-
-			statistics.elapsed_time_seconds = (
-				perf_counter() - start_time
-			)
-
-			return SearchResult(
-				best_move=None,
-				score=score,
-				statistics=statistics,
-				termination_reason=SearchTerminationReason.COMPLETED,
-			)
-
-		best_move: MoveT | None = None
-		best_score = -inf
-		alpha = -inf
-		beta = inf
-
-		depth = self.limits.max_depth
-		child_depth = depth - 1 if depth is not None else None
-
-		for move in moves:
-			undo_data = self.game.make_move(state, move)
-
-			try:
-				score, _ = minimax(
-					child_depth,
-					1,
-					alpha,
-					beta,
-				)
-			finally:
-				self.game.unmake_move(
-					state,
-					move,
-					undo_data,
-				)
-
-			if best_move is None or score > best_score:
-				best_move = move
-				best_score = score
-
-			if self.alpha_beta:
-				alpha = max(alpha, best_score)
-
-		# The fixed-depth search completed successfully.
-		if depth is not None:
-			statistics.completed_depth = depth
-
-		statistics.elapsed_time_seconds = (
-			perf_counter() - start_time
+		statistics = SearchStatistics(
+			nodes_visited=counters.nodes,
+			leaf_nodes=counters.leaves,
+			terminal_nodes=counters.terminals,
+			cutoffs=counters.cutoffs if self.alpha_beta else None,
+			transposition_table_hits=(
+				counters.hits if table is not None else None
+			),
+			transposition_table_stores=(
+				counters.stores if table is not None else None
+			),
+			transposition_table_invalidations=(
+				counters.invalidations if tracking else None
+			),
+			transposition_table_refreshes=(
+				counters.refreshes if tracking else None
+			),
+			iterations_completed=None,
+			elapsed_time_seconds=perf_counter() - start_time,
+			completed_depth=root_depth,
+			max_ply_reached=counters.max_ply,
 		)
 
 		return SearchResult(
-			best_move=best_move,
-			score=best_score,
+			best_move=result.best_move,
+			score=result.score,
 			statistics=statistics,
 			termination_reason=SearchTerminationReason.COMPLETED,
 		)
-

@@ -1,6 +1,7 @@
 from .transposition_table import (
 	TranspositionBound,
 	TranspositionEntry,
+	StoreOutcome,
 	TranspositionTable,
 )
 
@@ -11,6 +12,7 @@ __all__ = [
 	"TranspositionBound",
 	"TranspositionEntry",
 	"TranspositionTable",
+	"StoreOutcome",
 	
 	"SearchDependencyTracker",
 ]
