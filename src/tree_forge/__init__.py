@@ -20,6 +20,7 @@ from .algorithms import (
 
 from .caching import (
 	SearchDependencyTracker,
+	StoreOutcome,
 	TranspositionBound,
 	TranspositionEntry,
 	TranspositionTable,
@@ -43,6 +44,7 @@ __all__ = [
 	"Minimax",
 	
 	"SearchDependencyTracker",
+	"StoreOutcome",
 	"TranspositionBound",
 	"TranspositionEntry",
 	"TranspositionTable",

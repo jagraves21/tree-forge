@@ -111,44 +111,154 @@ class SearchConfig:
 class SearchStatistics:
 	"""Statistics collected during a search operation.
 
-	Counters are cumulative across iterative-deepening passes.
+	Every statistic is either a measured value or None. None means the
+	statistic was not measured: it is disabled, unavailable, or not
+	applicable to the search that produced these statistics (for
+	example, cutoffs when alpha-beta pruning is off). A value of 0 only
+	ever means that the statistic was measured and its result was zero.
 
-	completed_depth represents the deepest fully completed
-	iteration. max_ply_reached represents the deepest recursive
-	ply visited, even if that iteration was interrupted.
+	nodes_visited, leaf_nodes and terminal_nodes count positions,
+	including the root. cutoffs counts alpha-beta cutoffs.
+
+	transposition_table_hits counts lookups that found an entry for
+	the position. transposition_table_stores counts writes that
+	changed the table; rejected writes are not counted.
+	transposition_table_invalidations and
+	transposition_table_refreshes count entries of previously
+	searched positions that were marked stale, or recomputed in
+	place, because information about their continuations changed.
+	They are only measured when the table tracks dependencies.
+
+	completed_depth is the depth of a completed fixed-depth search
+	and is None when the search had no depth limit.
+	iterations_completed counts iterative-deepening passes and is
+	None for algorithms that do not iterate. max_ply_reached is the
+	deepest ply visited, even if the search was interrupted.
+
+	Use merge() to aggregate the statistics of several searches.
 	"""
 
-	nodes_visited: int = 0
-	leaf_nodes: int = 0
-	terminal_nodes: int = 0
+	nodes_visited: int | None = None
+	leaf_nodes: int | None = None
+	terminal_nodes: int | None = None
 
-	cutoffs: int = 0
+	cutoffs: int | None = None
 
-	transposition_table_hits: int = 0
-	transposition_table_stores: int = 0
-	transposition_table_invalidations: int = 0
+	transposition_table_hits: int | None = None
+	transposition_table_stores: int | None = None
+	transposition_table_invalidations: int | None = None
+	transposition_table_refreshes: int | None = None
 
-	iterations_completed: int = 0
+	iterations_completed: int | None = None
 
-	elapsed_time_seconds: float = 0.0
-	completed_depth: int = 0
-	max_ply_reached: int = 0
+	elapsed_time_seconds: float | None = None
+	completed_depth: int | None = None
+	max_ply_reached: int | None = None
+
+	_SUMMED = (
+		"nodes_visited",
+		"leaf_nodes",
+		"terminal_nodes",
+		"cutoffs",
+		"transposition_table_hits",
+		"transposition_table_stores",
+		"transposition_table_invalidations",
+		"transposition_table_refreshes",
+		"iterations_completed",
+		"elapsed_time_seconds",
+	)
+
+	_DEEPEST = (
+		"completed_depth",
+		"max_ply_reached",
+	)
+
+	def merge(self, other: SearchStatistics) -> SearchStatistics:
+		"""Return the combined statistics of two searches.
+
+		Counters and elapsed time are added. completed_depth and
+		max_ply_reached keep the larger value. A statistic that was
+		not measured by one of the searches is taken from the other;
+		it is only None when neither search measured it, so the
+		result never reports a measurement that did not happen.
+		"""
+		combined = SearchStatistics()
+
+		for name in self._SUMMED:
+			setattr(
+				combined,
+				name,
+				self._combine(
+					getattr(self, name),
+					getattr(other, name),
+					lambda left, right: left + right,
+				),
+			)
+
+		for name in self._DEEPEST:
+			setattr(
+				combined,
+				name,
+				self._combine(getattr(self, name), getattr(other, name), max),
+			)
+
+		return combined
+
+	@staticmethod
+	def _combine(left, right, operation):
+		if left is None:
+			return right
+
+		if right is None:
+			return left
+
+		return operation(left, right)
+
+	@staticmethod
+	def _format(value: int | float | None, template: str = "{:,}") -> str:
+		return "n/a" if value is None else template.format(value)
 
 	def __str__(self) -> str:
+		rows = [
+			("Nodes visited:", self._format(self.nodes_visited)),
+			("Leaf nodes:", self._format(self.leaf_nodes)),
+			("Terminal nodes:", self._format(self.terminal_nodes)),
+			("Alpha-beta cutoffs:", self._format(self.cutoffs)),
+			(
+				"Transposition hits:",
+				self._format(self.transposition_table_hits),
+			),
+			(
+				"Transposition stores:",
+				self._format(self.transposition_table_stores),
+			),
+			(
+				"Transposition invalidations:",
+				self._format(self.transposition_table_invalidations),
+			),
+			(
+				"Transposition refreshes:",
+				self._format(self.transposition_table_refreshes),
+			),
+			(
+				"Search time:",
+				self._format(self.elapsed_time_seconds, "{:.6f}s"),
+			),
+			("Completed depth:", self._format(self.completed_depth, "{}")),
+			(
+				"Iterations completed:",
+				self._format(self.iterations_completed, "{}"),
+			),
+			(
+				"Maximum ply reached:",
+				self._format(self.max_ply_reached, "{}"),
+			),
+		]
+
 		return "\n".join([
 			"SEARCH STATISTICS",
 			"=" * 35,
-			f"{'Nodes visited:':<25} {self.nodes_visited:,}",
-			f"{'Leaf nodes:':<25} {self.leaf_nodes:,}",
-			f"{'Terminal nodes:':<25} {self.terminal_nodes:,}",
-			f"{'Alpha-beta cutoffs:':<25} {self.cutoffs:,}",
-			f"{'Transposition hits:':<25} {self.transposition_table_hits:,}",
-			f"{'Transposition stores:':<25} {self.transposition_table_stores:,}",
-			f"{'Transposition invalidations:':<25} {self.transposition_table_invalidations:,}",
-			f"{'Search time:':<25} {self.elapsed_time_seconds:.6f}s",
-			f"{'Completed depth:':<25} {self.completed_depth}",
-			f"{'Iterations completed:':<25} {self.iterations_completed}",
-			f"{'Maximum ply reached:':<25} {self.max_ply_reached}",
+			*(f"{label:<25} {value}" for label, value in rows),
 			"=" * 35,
 		])
 
@@ -159,10 +269,12 @@ class SearchResult(Generic[MoveT]):
 
 	If a search is interrupted, best_move and score should represent
 	the last successfully completed search iteration, when available.
+
+	score is None when the algorithm does not evaluate positions.
 	"""
 
 	best_move: MoveT | None
-	score: float
+	score: float | None
 
 	statistics: SearchStatistics = field(
 		default_factory=SearchStatistics
@@ -175,18 +287,20 @@ class SearchResult(Generic[MoveT]):
 	)
 
 	@property
-	def completed_depth(self) -> int:
-		"""Return the deepest fully completed search depth."""
+	def completed_depth(self) -> int | None:
+		"""Return the completed search depth, or None if not applicable."""
 		return self.statistics.completed_depth
 
 	def __str__(self) -> str:
+		score = "n/a" if self.score is None else f"{self.score:.2f}"
+
 		return "\n".join([
 			"SEARCH RESULT",
 			"=" * 35,
 			f"{'Best move:':<25} {self.best_move}",
-			f"{'Score:':<25} {self.score:.2f}",
+			f"{'Score:':<25} {score}",
 			f"{'Completed:':<25} {self.completed}",
-			f"{'Termination reason:':<25} {self.termination_reason.value}",
+			f"{'Termination reason:':<25} {self.termination_reason.name}",
 			"",
 			str(self.statistics),
 		])
