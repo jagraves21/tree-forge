@@ -8,6 +8,7 @@ EXPECTED_EXPORTS = {
 	"TranspositionBound": transposition_table,
 	"TranspositionEntry": transposition_table,
 	"TranspositionTable": transposition_table,
+	"StoreOutcome": transposition_table,
 	"SearchDependencyTracker": search_dependency_tracker,
 }
 
