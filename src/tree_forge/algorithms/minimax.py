@@ -524,6 +524,9 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 			transposition_table_refreshes=(
 				counters.refreshes if tracking else None
 			),
+			transposition_table_size=(
+				len(table) if table is not None else None
+			),
 			iterations_completed=None,
 			elapsed_time_seconds=perf_counter() - start_time,
 			completed_depth=root_depth,
