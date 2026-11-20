@@ -277,6 +277,7 @@ STATISTIC_NAMES = [
 	"transposition_table_stores",
 	"transposition_table_invalidations",
 	"transposition_table_refreshes",
+	"transposition_table_size",
 	"iterations_completed",
 	"elapsed_time_seconds",
 	"completed_depth",
@@ -292,6 +293,7 @@ COUNTER_NAMES = [
 	"transposition_table_stores",
 	"transposition_table_invalidations",
 	"transposition_table_refreshes",
+	"transposition_table_size",
 	"iterations_completed",
 ]
 
@@ -353,6 +355,15 @@ class TestSearchStatisticsMerge:
 		assert combined.nodes_visited == 7
 		assert combined.cutoffs == 1
 
+	def test_table_sizes_are_not_added_together(self) -> None:
+		# Both searches may have used the same table, so adding the
+		# sizes of the table would count its entries twice.
+		combined = SearchStatistics(transposition_table_size=508).merge(
+			SearchStatistics(transposition_table_size=712)
+		)
+
+		assert combined.transposition_table_size == 712
+
 	def test_adds_elapsed_time(self) -> None:
 		combined = SearchStatistics(elapsed_time_seconds=0.25).merge(
 			SearchStatistics(elapsed_time_seconds=0.5)
@@ -360,8 +371,15 @@ class TestSearchStatisticsMerge:
 
 		assert combined.elapsed_time_seconds == 0.75
 
-	@pytest.mark.parametrize("name", ["completed_depth", "max_ply_reached"])
-	def test_keeps_the_deepest_value(self, name: str) -> None:
+	@pytest.mark.parametrize("name", [
+		"completed_depth",
+		"max_ply_reached",
+		"transposition_table_size",
+	])
+	def test_keeps_the_largest_value_of_a_snapshot_or_maximum(
+		self,
+		name: str,
+	) -> None:
 		combined = SearchStatistics(**{name: 3}).merge(
 			SearchStatistics(**{name: 5})
 		)
@@ -445,6 +463,7 @@ class TestSearchStatisticsString:
 			transposition_table_stores=9_000,
 			transposition_table_invalidations=4,
 			transposition_table_refreshes=6,
+			transposition_table_size=2_048,
 			iterations_completed=5,
 			elapsed_time_seconds=0.25,
 			completed_depth=6,
@@ -467,8 +486,8 @@ class TestSearchStatisticsString:
 	) -> None:
 		lines = str(populated).splitlines()
 
-		# Title, two rules, and twelve statistics.
-		assert len(lines) == 15
+		# Title, two rules, and thirteen statistics.
+		assert len(lines) == 16
 		assert set(parse_report(str(populated))) == {
 			"Nodes visited",
 			"Leaf nodes",
@@ -478,6 +497,7 @@ class TestSearchStatisticsString:
 			"Transposition stores",
 			"Transposition invalidations",
 			"Transposition refreshes",
+			"Transposition table size",
 			"Search time",
 			"Completed depth",
 			"Iterations completed",
@@ -491,6 +511,7 @@ class TestSearchStatisticsString:
 		assert report["Terminal nodes"] == "12"
 		assert report["Transposition invalidations"] == "4"
 		assert report["Transposition refreshes"] == "6"
+		assert report["Transposition table size"] == "2,048"
 		assert report["Completed depth"] == "6"
 		assert report["Iterations completed"] == "5"
 		assert report["Maximum ply reached"] == "8"

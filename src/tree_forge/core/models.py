@@ -128,6 +128,9 @@ class SearchStatistics:
 	searched positions that were marked stale, or recomputed in
 	place, because information about their continuations changed.
 	They are only measured when the table tracks dependencies.
+	transposition_table_size is the number of entries in the table
+	when the search returned, including entries stored by earlier
+	searches that use the same table.
 
 	completed_depth is the depth of a completed fixed-depth search
 	and is None when the search had no depth limit.
@@ -148,6 +151,7 @@ class SearchStatistics:
 	transposition_table_stores: int | None = None
 	transposition_table_invalidations: int | None = None
 	transposition_table_refreshes: int | None = None
+	transposition_table_size: int | None = None
 
 	iterations_completed: int | None = None
 
@@ -168,7 +172,9 @@ class SearchStatistics:
 		"elapsed_time_seconds",
 	)
 
-	_DEEPEST = (
+	# Snapshots and maxima, which are not added up.
+	_LARGEST = (
+		"transposition_table_size",
 		"completed_depth",
 		"max_ply_reached",
 	)
@@ -176,8 +182,9 @@ class SearchStatistics:
 	def merge(self, other: SearchStatistics) -> SearchStatistics:
 		"""Return the combined statistics of two searches.
 
-		Counters and elapsed time are added. completed_depth and
-		max_ply_reached keep the larger value. A statistic that was
+		Counters and elapsed time are added. completed_depth,
+		max_ply_reached and transposition_table_size keep the larger
+		value, since they are not amounts that accumulate. A statistic that was
 		not measured by one of the searches is taken from the other;
 		it is only None when neither search measured it, so the
 		result never reports a measurement that did not happen.
@@ -195,7 +202,7 @@ class SearchStatistics:
 				),
 			)
 
-		for name in self._DEEPEST:
+		for name in self._LARGEST:
 			setattr(
 				combined,
 				name,
@@ -239,6 +246,10 @@ class SearchStatistics:
 			(
 				"Transposition refreshes:",
 				self._format(self.transposition_table_refreshes),
+			),
+			(
+				"Transposition table size:",
+				self._format(self.transposition_table_size),
 			),
 			(
 				"Search time:",
