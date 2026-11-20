@@ -116,6 +116,7 @@ class TestRandomSearchSearch:
 		"transposition_table_stores",
 		"transposition_table_invalidations",
 		"transposition_table_refreshes",
+		"transposition_table_size",
 		"iterations_completed",
 		"elapsed_time_seconds",
 		"completed_depth",

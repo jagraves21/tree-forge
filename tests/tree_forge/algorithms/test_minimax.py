@@ -530,6 +530,7 @@ class TestMinimaxStatisticsAvailability:
 	CACHE_STATISTICS = [
 		"transposition_table_hits",
 		"transposition_table_stores",
+		"transposition_table_size",
 	]
 
 	DEPENDENCY_STATISTICS = [
@@ -611,6 +612,82 @@ class TestMinimaxStatisticsAvailability:
 
 		# Nothing was invalidated or refreshed, which is a measurement.
 		assert getattr(statistics, name) == 0
+
+	@pytest.mark.parametrize("tracking", [False, True])
+	def test_table_size_is_the_number_of_entries_when_the_search_returns(
+		self,
+		game: TreeGame,
+		tracking: bool,
+	) -> None:
+		table = TranspositionTable(dependency_tracking=tracking)
+		search = make_search(
+			game,
+			canonicalizer=TreeCanonicalizer(),
+			transposition_table=table,
+		)
+
+		statistics = search.search(game.initial_state()).statistics
+
+		# The root and its six descendants.
+		assert statistics.transposition_table_size == 7
+		assert statistics.transposition_table_size == len(table)
+
+	def test_table_size_includes_entries_from_earlier_searches(self) -> None:
+		game = TreeGame(DISCOVERY_TREE, DISCOVERY_SCORES)
+		table = TranspositionTable()
+		search = Minimax(
+			game,
+			limits=SearchLimits(max_depth=None),
+			alpha_beta=True,
+			canonicalizer=TreeCanonicalizer(),
+			transposition_table=table,
+		)
+
+		first = search.search(TreeState("root", 1)).statistics
+		second = search.search(TreeState("B", 2)).statistics
+
+		# Pruning leaves "a2" unsearched: the first search stores p1, P,
+		# a1, A, and the root. The second adds "B" and "a2".
+		assert first.transposition_table_size == 5
+		assert second.transposition_table_size == 7
+
+	def test_table_size_does_not_change_when_nothing_new_is_stored(
+		self,
+		game: TreeGame,
+	) -> None:
+		search = make_search(game, canonicalizer=TreeCanonicalizer())
+
+		first = search.search(game.initial_state()).statistics
+		second = search.search(game.initial_state()).statistics
+
+		assert second.transposition_table_size == first.transposition_table_size
+
+	def test_table_size_counts_positions_not_writes(self, game: TreeGame) -> None:
+		search = make_search(game, canonicalizer=TreeCanonicalizer())
+
+		statistics = search.search(game.initial_state()).statistics
+
+		# Every position is written once here, but rewriting a position
+		# would not make the table any bigger.
+		assert statistics.transposition_table_size <= (
+			statistics.transposition_table_stores
+		)
+
+	def test_table_size_is_the_total_not_only_what_this_search_added(
+		self,
+		game: TreeGame,
+	) -> None:
+		table = TranspositionTable()
+		table.store(cached("unrelated", 1, 0.0, TranspositionBound.EXACT))
+		search = make_search(
+			game,
+			canonicalizer=TreeCanonicalizer(),
+			transposition_table=table,
+		)
+
+		statistics = search.search(game.initial_state()).statistics
+
+		assert statistics.transposition_table_size == 8
 
 	def test_a_first_search_measures_zero_hits(self, game: TreeGame) -> None:
 		search = make_search(game, canonicalizer=TreeCanonicalizer())
@@ -1473,6 +1550,66 @@ def snapshot(table: TranspositionTable) -> dict:
 		key: (entry.lower, entry.upper, entry.solved, entry.score_valid)
 		for key, entry in table._entries.items()
 	}
+
+
+class TestMinimaxInvalidations:
+	"""Invalidations only happen for dependencies without a known relation.
+
+	Minimax registers every dependency together with its relation, so the
+	positions it affects are recomputed (refreshed) instead of invalidated.
+	Invalidations therefore stay at zero unless the table also holds
+	dependencies that were registered without a relation.
+	"""
+
+	def test_minimax_refreshes_instead_of_invalidating(self) -> None:
+		_, _, search = discovery_search()
+		search.search(TreeState("root", 1))
+
+		statistics = search.search(TreeState("B", 2)).statistics
+
+		assert statistics.transposition_table_refreshes > 0
+		assert statistics.transposition_table_invalidations == 0
+
+	def test_a_dependency_without_a_relation_is_counted_as_an_invalidation(
+		self,
+		game: TreeGame,
+	) -> None:
+		table = TranspositionTable(dependency_tracking=True)
+		stale_key = ("legacy", 9)
+
+		# Registered like this, nothing says how "a1" contributes to it.
+		table.store(cached(stale_key, 3, 1.0, TranspositionBound.EXACT))
+		table.replace_dependencies(stale_key, [("a1", 1)])
+
+		search = make_search(
+			game,
+			canonicalizer=TreeCanonicalizer(),
+			transposition_table=table,
+		)
+
+		statistics = search.search(game.initial_state()).statistics
+
+		assert statistics.transposition_table_invalidations == 1
+		assert statistics.transposition_table_refreshes == 0
+		assert table.get(stale_key).score_valid is False
+
+	def test_an_invalidated_entry_is_counted_once(self, game: TreeGame) -> None:
+		table = TranspositionTable(dependency_tracking=True)
+		stale_key = ("legacy", 9)
+		table.store(cached(stale_key, 3, 1.0, TranspositionBound.EXACT))
+		table.replace_dependencies(stale_key, [("a1", 1), ("a2", 1)])
+
+		search = make_search(
+			game,
+			canonicalizer=TreeCanonicalizer(),
+			transposition_table=table,
+		)
+
+		# Both "a1" and "a2" are new, but the entry is already stale after
+		# the first of them.
+		statistics = search.search(game.initial_state()).statistics
+
+		assert statistics.transposition_table_invalidations == 1
 
 
 class TestMinimaxDependencyTracking:
