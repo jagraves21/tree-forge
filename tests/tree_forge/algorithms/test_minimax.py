@@ -980,6 +980,212 @@ class TestMinimaxMoveOrdering:
 		assert state == TreeState()
 
 
+def seeded_search(game: TreeGame, cached_move: str, **kwargs) -> Minimax:
+	"""A search whose table already remembers a best move for the root."""
+	search = Minimax(
+		game,
+		limits=SearchLimits(max_depth=None),
+		canonicalizer=TreeCanonicalizer(),
+		**kwargs,
+	)
+
+	search.transposition_table.store(
+		TranspositionEntry(
+			key=("root", 1),
+			depth=None,
+			best_move=TreeMove(cached_move),
+		)
+	)
+
+	return search
+
+
+EQUAL_SCORES = dict.fromkeys(SHALLOW_SCORES, 1.0)
+
+THREE_EQUAL_MOVES = {
+	"tree": {
+		"root": ("a", "b", "c"),
+		"a": ("a1",),
+		"b": ("b1",),
+		"c": ("c1",),
+	},
+	"scores": {"a1": 1.0, "b1": 1.0, "c1": 1.0},
+}
+
+
+class TestMinimaxRootTies:
+	"""Equally good root moves are decided by the move ordering alone."""
+
+	@pytest.mark.parametrize("alpha_beta", [False, True])
+	def test_a_cached_move_does_not_decide_between_equal_moves(
+		self,
+		alpha_beta: bool,
+	) -> None:
+		game = TreeGame(SHALLOW_TREE, EQUAL_SCORES)
+		search = seeded_search(game, "b", alpha_beta=alpha_beta)
+
+		result = search.search(game.initial_state())
+
+		# "b" is cached, but "a" is first in the legal moves.
+		assert result.best_move == TreeMove("a")
+
+	@pytest.mark.parametrize("alpha_beta", [False, True])
+	def test_the_move_ordering_decides_between_equal_moves(
+		self,
+		alpha_beta: bool,
+	) -> None:
+		game = TreeGame(SHALLOW_TREE, EQUAL_SCORES)
+		search = seeded_search(
+			game,
+			"a",
+			alpha_beta=alpha_beta,
+			move_ordering=ReversingMoveOrdering(),
+		)
+
+		result = search.search(game.initial_state())
+
+		assert result.best_move == TreeMove("b")
+
+	@pytest.mark.parametrize("alpha_beta", [False, True])
+	def test_the_choice_does_not_depend_on_what_was_searched_before(
+		self,
+		alpha_beta: bool,
+	) -> None:
+		game = TreeGame(SHALLOW_TREE, EQUAL_SCORES)
+		table = TranspositionTable()
+
+		def search(**kwargs) -> Minimax:
+			return Minimax(
+				game,
+				limits=SearchLimits(max_depth=None),
+				alpha_beta=alpha_beta,
+				canonicalizer=TreeCanonicalizer(),
+				transposition_table=table,
+				**kwargs,
+			)
+
+		# An earlier search with the opposite preference fills the table.
+		earlier = search(move_ordering=ReversingMoveOrdering()).search(
+			game.initial_state()
+		)
+		warm = search().search(game.initial_state())
+		fresh = make_search(
+			TreeGame(SHALLOW_TREE, EQUAL_SCORES),
+			depth=None,
+			alpha_beta=alpha_beta,
+			canonicalizer=TreeCanonicalizer(),
+		).search(TreeState())
+
+		assert earlier.best_move == TreeMove("b")
+		assert warm.best_move == fresh.best_move == TreeMove("a")
+
+	def test_a_cached_move_is_still_searched_first(self) -> None:
+		game = TreeGame(SHALLOW_TREE, EQUAL_SCORES)
+		search = seeded_search(game, "b")
+
+		search.search(game.initial_state())
+
+		# Searching it first is what makes pruning effective.
+		assert game.made[0] == "b"
+
+	@pytest.mark.parametrize("alpha_beta", [False, True])
+	def test_a_better_move_beats_both_the_ordering_and_the_cache(
+		self,
+		alpha_beta: bool,
+	) -> None:
+		game = TreeGame(SHALLOW_TREE, SHALLOW_SCORES)
+		search = seeded_search(
+			game,
+			"b",
+			alpha_beta=alpha_beta,
+			move_ordering=ReversingMoveOrdering(),
+		)
+
+		result = search.search(game.initial_state())
+
+		# "a" is worth 3 and "b" only 2.
+		assert result.best_move == TreeMove("a")
+		assert result.score == 3.0
+
+	@pytest.mark.parametrize("alpha_beta", [False, True])
+	def test_an_earlier_move_that_only_looks_tied_does_not_win(
+		self,
+		alpha_beta: bool,
+	) -> None:
+		# "a" ranks first and its first reply is worth 1, the same as "b",
+		# but its second reply is worth 0, so "a" is worth only 0.
+		game = TreeGame(
+			SHALLOW_TREE,
+			{"a1": 1.0, "a2": 0.0, "b1": 1.0, "b2": 1.0},
+		)
+		search = seeded_search(game, "b", alpha_beta=alpha_beta)
+
+		result = search.search(game.initial_state())
+
+		assert result.best_move == TreeMove("b")
+		assert result.score == 1.0
+
+	@pytest.mark.parametrize("alpha_beta", [False, True])
+	def test_an_earlier_move_that_really_is_tied_wins(
+		self,
+		alpha_beta: bool,
+	) -> None:
+		game = TreeGame(
+			SHALLOW_TREE,
+			{"a1": 1.0, "a2": 1.0, "b1": 1.0, "b2": 1.0},
+		)
+		search = seeded_search(game, "b", alpha_beta=alpha_beta)
+
+		result = search.search(game.initial_state())
+
+		assert result.best_move == TreeMove("a")
+
+	@pytest.mark.parametrize("cached_move", ["a", "b", "c"])
+	@pytest.mark.parametrize("alpha_beta", [False, True])
+	def test_the_best_ranked_of_several_equal_moves_wins(
+		self,
+		cached_move: str,
+		alpha_beta: bool,
+	) -> None:
+		game = TreeGame(
+			THREE_EQUAL_MOVES["tree"],
+			THREE_EQUAL_MOVES["scores"],
+		)
+		search = seeded_search(game, cached_move, alpha_beta=alpha_beta)
+
+		assert search.search(game.initial_state()).best_move == TreeMove("a")
+
+	@pytest.mark.parametrize("cached_move", ["a", "b", "c"])
+	def test_the_ordering_ranks_all_equal_moves(self, cached_move: str) -> None:
+		game = TreeGame(
+			THREE_EQUAL_MOVES["tree"],
+			THREE_EQUAL_MOVES["scores"],
+		)
+		search = seeded_search(
+			game,
+			cached_move,
+			alpha_beta=True,
+			move_ordering=ReversingMoveOrdering(),
+		)
+
+		assert search.search(game.initial_state()).best_move == TreeMove("c")
+
+	def test_the_score_is_the_same_whichever_move_is_chosen(self) -> None:
+		game = TreeGame(SHALLOW_TREE, SHALLOW_SCORES)
+
+		scores = {
+			seeded_search(
+				game,
+				cached,
+				alpha_beta=alpha_beta,
+			).search(game.initial_state()).score
+			for cached in ("a", "b")
+			for alpha_beta in (False, True)
+		}
+
+		assert scores == {3.0}
+
+
 class TestMinimaxTranspositionTable:
 	@staticmethod
 	def make_cached_search(game: TreeGame, **kwargs) -> Minimax:

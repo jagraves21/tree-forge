@@ -137,6 +137,7 @@ class TestEvaluate:
 
 class TestEvaluateOverAllPositions:
 	@pytest.fixture(scope="class")
+	@classmethod
 	def open_states(self) -> list[GameState]:
 		game = TicTacToeGame()
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Hashable, Sequence
-from math import inf
+from math import inf, nextafter
 from time import perf_counter
 from typing import Generic, NamedTuple, TypeVar
 
@@ -87,6 +87,13 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 	Information discovered by later searches therefore improves the
 	cached values of positions that were searched earlier, as
 	described in TranspositionTable.
+
+	Of several root moves that are equally good, the one that the move
+	ordering ranks first is returned, whatever order they were searched
+	in and whatever earlier searches cached. A move ordering can therefore
+	express preferences that scores cannot, such as stopping an opponent's
+	threat when every move loses at the same time. It never makes the
+	search return a move with a worse score.
 
 	Statistics that are not measured, such as cutoffs without
 	alpha-beta pruning or table statistics without a table, are None.
@@ -390,10 +397,13 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 
 				return _Node(score, False, None)
 
+			# Every move remembers its place in the move ordering, which
+			# decides between equally good moves at the root.
+			ranked = list(enumerate(moves))
+
 			# Search the cached best move first when it is legal.
 			if cached_move in moves:
-				moves.remove(cached_move)
-				moves.insert(0, cached_move)
+				ranked.insert(0, ranked.pop(moves.index(cached_move)))
 
 			best_score = -inf if maximizing else inf
 			best_move = None
@@ -404,7 +414,9 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 
 			next_depth = depth - 1 if depth is not None else None
 
-			for move in moves:
+			best_rank = 0
+
+			for rank, move in ranked:
 				undo_data = self.game.make_move(state, move)
 				searched += 1
 
@@ -415,10 +427,23 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 						child_position, relation = continuation(maximizing)
 						continuations[child_position.key] = relation
 
+					# At the root, a move that ranks above the best move so far
+					# wins a tie, so it is searched for a score that equals the
+					# best score instead of one that beats it.
+					child_alpha = alpha
+
+					if (
+						ply == 0
+						and self.alpha_beta
+						and best_move is not None
+						and rank < best_rank
+					):
+						child_alpha = nextafter(alpha, -inf)
+
 					score, child_solved, _ = minimax(
 						next_depth,
 						ply + 1,
-						alpha,
+						child_alpha,
 						beta,
 						child_position,
 					)
@@ -432,13 +457,18 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 				if not child_solved:
 					all_children_solved = False
 
+				# At the root, equally good moves are decided by the move
+				# ordering, no matter in which order they were searched. A
+				# move found later is only preferred if it ranks higher.
 				if (
 					best_move is None
 					or (maximizing and score > best_score)
 					or (not maximizing and score < best_score)
+					or (ply == 0 and score == best_score and rank < best_rank)
 				):
 					best_move = move
 					best_score = score
+					best_rank = rank
 
 				if maximizing:
 					if self.alpha_beta:
@@ -456,7 +486,7 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 			# searched: information about them may arrive from later
 			# searches, so they are dependencies as well.
 			if tracking and position is not None:
-				for move in moves[searched:]:
+				for _, move in ranked[searched:]:
 					undo_data = self.game.make_move(state, move)
 
 					try:
