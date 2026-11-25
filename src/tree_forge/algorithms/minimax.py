@@ -71,8 +71,11 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 	"""Minimax search with optional alpha-beta pruning and caching.
 
 	Scores are from the perspective of the player to move at the
-	root. Terminal positions are scored by the game, and positions at
-	the depth limit by the evaluator (or 0 without one).
+	root. Every position is valued by the evaluator, terminal ones
+	included: the game only reports whether a position is terminal and
+	what its outcome is, and the search never assigns values to wins,
+	losses or draws itself. Without an evaluator, a default Evaluator
+	is used.
 
 	With a canonicalizer, every searched position, including the
 	root, is cached in a transposition table as an interval of
@@ -81,6 +84,9 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 	it is proven (solved). The table must belong to a single game and
 	evaluator, and the evaluator is assumed to be zero-sum, so that
 	scores can be stored from the perspective of the player to move.
+	Cached scores are not adjusted for the ply or depth at which a
+	position is reached, so an evaluator whose values depend on ply or
+	depth may see stale values reused.
 
 	When the table tracks dependencies, every position registers all
 	of its legal continuations as dependencies, searched or not.
@@ -115,7 +121,7 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 			)
 
 		self.game = game
-		self.evaluator = evaluator
+		self.evaluator = evaluator if evaluator is not None else Evaluator()
 		self.limits = limits or SearchLimits()
 		self.alpha_beta = alpha_beta
 		self.canonicalizer = canonicalizer
@@ -143,11 +149,27 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 		root_player = self.game.current_player(state)
 		root_depth = self.limits.max_depth
 
-		def evaluate_position() -> float:
-			if self.evaluator is None:
-				return 0.0
+		def evaluate_position(
+			terminal: bool,
+			ply: int,
+			depth: int | None,
+		) -> float:
+			"""Return the evaluator's value of the current position.
 
-			return self.evaluator.evaluate(state, root_player)
+			The value is from the root player's perspective. The search
+			assigns no value of its own to any outcome.
+			"""
+			outcome = (
+				self.game.outcome(state, root_player) if terminal else None
+			)
+
+			return self.evaluator.evaluate(
+				state,
+				root_player,
+				outcome,
+				ply,
+				depth,
+			)
 
 		def to_root_interval(
 			entry: TranspositionEntry[MoveT],
@@ -362,12 +384,14 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 			window_alpha = alpha
 			window_beta = beta
 
+			terminal = self.game.is_terminal(state)
+
 			# Handle terminal positions.
-			if self.game.is_terminal(state):
+			if terminal:
 				counters.leaves += 1
 				counters.terminals += 1
 
-				score = self.game.terminal_score(state, root_player)
+				score = evaluate_position(True, ply, depth)
 
 				finish_leaf(position, depth, score, maximizing, True)
 
@@ -376,7 +400,7 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 			# Handle depth-limited positions.
 			if depth == 0:
 				counters.leaves += 1
-				score = evaluate_position()
+				score = evaluate_position(False, ply, depth)
 
 				finish_leaf(position, depth, score, maximizing, False)
 
@@ -391,7 +415,7 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 			# Handle positions without legal moves.
 			if not moves:
 				counters.leaves += 1
-				score = evaluate_position()
+				score = evaluate_position(False, ply, depth)
 
 				finish_leaf(position, depth, score, maximizing, False)
 
@@ -478,9 +502,16 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 						beta = min(beta, best_score)
 
 				if self.alpha_beta and alpha >= beta:
-					counters.cutoffs += 1
-					cutoff_occurred = True
-					break
+					# Only an infinite score closes the root's window. Moves
+					# that rank above the best move so far must still be
+					# searched, because they win a tie with it.
+					if ply > 0 or all(
+						later_rank > best_rank
+						for later_rank, _ in ranked[searched:]
+					):
+						counters.cutoffs += 1
+						cutoff_occurred = True
+						break
 
 			# The result also depends on the continuations that were not
 			# searched: information about them may arrive from later
@@ -509,9 +540,9 @@ class Minimax(Generic[StateT, MoveT, PlayerT, UndoT]):
 			# of the alpha-beta window used to reach this node.
 			if solved:
 				lower, upper = best_score, best_score
-			elif best_score <= window_alpha:
+			elif window_alpha > -inf and best_score <= window_alpha:
 				lower, upper = None, best_score
-			elif best_score >= window_beta:
+			elif window_beta < inf and best_score >= window_beta:
 				lower, upper = best_score, None
 			else:
 				lower, upper = best_score, best_score

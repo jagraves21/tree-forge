@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Generic, Hashable, TypeVar
 
-from .models import CanonicalPosition
+from .models import CanonicalPosition, Outcome
 
 
 StateT = TypeVar("StateT")
@@ -57,32 +57,112 @@ class Game(ABC, Generic[StateT, MoveT, PlayerT, UndoT]):
 		raise NotImplementedError
 
 	@abstractmethod
-	def terminal_score(self, state: StateT, player: PlayerT) -> float:
-		"""Return the terminal score from the specified player's perspective.
+	def outcome(self, state: StateT, player: PlayerT) -> Outcome:
+		"""Return the outcome of a terminal position for a player.
 
-		Positive scores indicate a win, negative scores indicate a loss,
-		and zero indicates a draw.
+		The outcome is relative to the supplied player: if the
+		opponent has won, the outcome for the supplied player is
+		Outcome.LOSS.
 
-		Scores must be zero-sum between the two players.
+		Implementations only identify the result of the game. The
+		numerical value of that result is decided by the Evaluator.
 		"""
 		raise NotImplementedError
 
 
 class Evaluator(ABC, Generic[StateT, PlayerT]):
-	"""Optional interface for game-specific position evaluation.
+	"""Assigns numerical values to terminal and nonterminal positions.
 
-	Implementations evaluate nonterminal positions from the
-	specified player's perspective.
+	The evaluator is responsible for the value of every position,
+	including wins, losses and draws. Search algorithms only compare
+	the values it returns; they never decide what makes a result
+	valuable.
+
+	This class is also the default evaluator. Wins are worth positive
+	infinity, losses negative infinity, and draws and nonterminal
+	positions 0.0. Subclasses override whichever methods they need,
+	for example to prefer faster wins, to value draws differently, or
+	to evaluate nonterminal positions with game-specific heuristics.
+
+	Values must be zero-sum: a position's value for one player is the
+	negation of its value for the opponent.
+
+	Values may depend on ply and depth, but search caches reuse
+	positions reached at a different ply or depth. A cached value can
+	therefore be inappropriate for the current search, and keeping
+	ply- and depth-dependent values consistent is the responsibility
+	of the evaluator's implementer.
 	"""
 
-	@abstractmethod
 	def evaluate(
 		self,
 		state: StateT,
 		player: PlayerT,
+		outcome: Outcome | None,
+		ply: int,
+		depth: int | None,
 	) -> float:
-		"""Return a heuristic score for the specified player."""
-		raise NotImplementedError
+		"""Return the value of a position for the specified player.
+
+		state is the position being evaluated and player the player
+		whose perspective is used. outcome is the position's outcome
+		relative to that player, or None if it is not terminal. ply is
+		the number of plies from the root of the current search to this
+		position, and depth is the remaining search depth at it (None
+		if the search has no depth limit).
+
+		The default implementation dispatches on the outcome.
+		"""
+		if outcome == Outcome.WIN:
+			return self.evaluate_win(state, player, ply, depth)
+
+		if outcome == Outcome.LOSS:
+			return self.evaluate_loss(state, player, ply, depth)
+
+		if outcome == Outcome.DRAW:
+			return self.evaluate_draw(state, player, ply, depth)
+
+		return self.evaluate_non_terminal(state, player, ply, depth)
+
+	def evaluate_win(
+		self,
+		state: StateT,
+		player: PlayerT,
+		ply: int,
+		depth: int | None,
+	) -> float:
+		"""Return the value of a position the player has won."""
+		return float("inf")
+
+	def evaluate_loss(
+		self,
+		state: StateT,
+		player: PlayerT,
+		ply: int,
+		depth: int | None,
+	) -> float:
+		"""Return the value of a position the player has lost."""
+		return float("-inf")
+
+	def evaluate_draw(
+		self,
+		state: StateT,
+		player: PlayerT,
+		ply: int,
+		depth: int | None,
+	) -> float:
+		"""Return the value of a position that ended in a draw."""
+		return 0.0
+
+	def evaluate_non_terminal(
+		self,
+		state: StateT,
+		player: PlayerT,
+		ply: int,
+		depth: int | None,
+	) -> float:
+		"""Return the value of a position that is not terminal."""
+		return 0.0
 
 
 class MoveOrdering(ABC, Generic[StateT, MoveT, PlayerT]):
