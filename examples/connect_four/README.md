@@ -32,7 +32,7 @@ python -m connect_four.main
 - Gravity-based piece placement.
 - Horizontal, vertical, and diagonal win detection.
 - Draw detection when the board is full.
-- Win, loss, and draw scoring.
+- Win, loss, and draw outcomes (valued by an `Evaluator`).
 - Make/unmake move support.
 - Position key generation for position identification.
 
