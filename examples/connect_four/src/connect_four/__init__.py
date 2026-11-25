@@ -15,6 +15,7 @@ from .canonicalizer import ConnectFourCanonicalizer
 
 from .move_ordering import (
 	ConnectFourMoveOrdering,
+	RandomizedConnectFourMoveOrdering,
 	RandomConnectFourMoveOrdering,
 )
 
@@ -34,6 +35,7 @@ __all__ = [
 	"ConnectFourCanonicalizer",
 	
 	"ConnectFourMoveOrdering",
+	"RandomizedConnectFourMoveOrdering",
 	"RandomConnectFourMoveOrdering",
 ]
 
