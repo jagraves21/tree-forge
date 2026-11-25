@@ -14,6 +14,8 @@ EXPECTED_EXPORTS = {
 	"TicTacToeEvaluator": evaluator,
 	"TicTacToeCanonicalizer": canonicalizer,
 	"TicTacToeMoveOrdering": move_ordering,
+	"RandomizedTicTacToeMoveOrdering": move_ordering,
+	"RandomTicTacToeMoveOrdering": move_ordering,
 }
 
 
