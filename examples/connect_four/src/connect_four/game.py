@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TypeAlias
 
-from tree_forge import Game
+from tree_forge import Game, Outcome
 
 
 BOARD_ROWS = 6
@@ -107,9 +107,6 @@ class ConnectFourGame(
 ):
 	"""Implementation of deterministic Connect Four."""
 
-	TERMINAL_WIN_SCORE = 1_000_000.0
-	TERMINAL_MOVE_PENALTY = 1.0
-
 	def initial_state(self) -> GameState:
 		return GameState()
 
@@ -192,27 +189,22 @@ class ConnectFourGame(
 			for column in range(BOARD_COLUMNS)
 		)
 
-	def terminal_score(
+	def outcome(
 		self,
 		state: GameState,
 		player: Player,
-	) -> float:
+	) -> Outcome:
 		if not self.is_terminal(state):
-			raise ValueError("Cannot score a nonterminal position")
+			raise ValueError(
+				"Cannot determine the outcome of a nonterminal position"
+			)
 
 		winner = self.winner(state)
 
 		if winner is None:
-			return 0.0
+			return Outcome.DRAW
 
-		move_penalty = (
-			state.move_count * self.TERMINAL_MOVE_PENALTY
-		)
-
-		if winner is player:
-			return self.TERMINAL_WIN_SCORE - move_penalty
-
-		return -self.TERMINAL_WIN_SCORE + move_penalty
+		return Outcome.WIN if winner is player else Outcome.LOSS
 
 	def position_key(self, state: GameState) -> tuple:
 		"""Return a collision-free representation of the position."""

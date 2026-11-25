@@ -10,6 +10,7 @@ EXPECTED_EXPORTS = {
 	"Game": interfaces,
 	"MoveOrdering": interfaces,
 	"CanonicalPosition": models,
+	"Outcome": models,
 	"SearchAlgorithm": models,
 	"SearchConfig": models,
 	"SearchLimits": models,

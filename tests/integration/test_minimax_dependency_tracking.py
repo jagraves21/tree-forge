@@ -7,6 +7,7 @@ which order.
 
 import random
 from functools import cache
+from math import inf
 
 import pytest
 
@@ -23,13 +24,14 @@ from tic_tac_toe import (
 	TicTacToeCanonicalizer,
 	TicTacToeGame,
 )
-from tree_forge import Minimax, SearchLimits
+from tree_forge import Evaluator, Minimax, SearchLimits
 from tree_forge.caching import TranspositionTable
 
 
 SYMBOLS = {".": None, "X": Player.X, "O": Player.O}
 
 GAME = TicTacToeGame()
+EVALUATOR = Evaluator()
 
 
 def copy_state(state: GameState) -> GameState:
@@ -58,9 +60,15 @@ def true_value(key: str) -> float:
 	state = state_from_key(key)
 
 	if GAME.is_terminal(state):
-		return GAME.terminal_score(state, state.current_player)
+		return EVALUATOR.evaluate(
+			state,
+			state.current_player,
+			GAME.outcome(state, state.current_player),
+			0,
+			0,
+		)
 
-	best = -2.0
+	best = -inf
 	canonicalizer = TicTacToeCanonicalizer()
 
 	for move in GAME.legal_moves(state):

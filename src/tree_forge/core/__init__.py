@@ -7,6 +7,7 @@ from .interfaces import (
 
 from .models import (
 	CanonicalPosition,
+	Outcome,
 	SearchAlgorithm,
 	SearchConfig,
 	SearchLimits,
@@ -23,6 +24,7 @@ __all__ = [
 	"Canonicalizer",
 
 	"CanonicalPosition",
+	"Outcome",
 	"SearchAlgorithm",
 	"SearchConfig",
 	"SearchLimits",

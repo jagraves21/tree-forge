@@ -1,11 +1,11 @@
 # Connect Four
 
-A simple Connect Four implementation demonstrating the Tree Forge game interface.
+A simple Connect Four implementation demonstrating the TreeForge game interface.
 
 ## Requirements
 
 - Python 3.11+
-- Tree Forge
+- TreeForge
 
 ## Installation
 
@@ -32,7 +32,7 @@ python -m connect_four.main
 - Gravity-based piece placement.
 - Horizontal, vertical, and diagonal win detection.
 - Draw detection when the board is full.
-- Win, loss, and draw scoring.
+- Win, loss, and draw outcomes (valued by an `Evaluator`).
 - Make/unmake move support.
 - Position key generation for position identification.
 
@@ -40,7 +40,7 @@ python -m connect_four.main
 
 This example serves as a reference implementation of the `Game` interface.
 
-It is intended to validate the Tree Forge framework independently of any particular search algorithm.
+It is intended to validate the TreeForge framework independently of any particular search algorithm.
 
 Future iterations may demonstrate Minimax, Negamax, alpha-beta pruning, transposition tables, and symmetry-based canonicalization.
 

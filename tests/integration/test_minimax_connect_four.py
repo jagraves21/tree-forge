@@ -12,8 +12,8 @@ from connect_four import (
 from tree_forge import Minimax, SearchLimits
 
 
-WIN_SCORE = ConnectFourGame.TERMINAL_WIN_SCORE
-MOVE_PENALTY = ConnectFourGame.TERMINAL_MOVE_PENALTY
+WIN_SCORE = ConnectFourEvaluator.WIN_SCORE
+MOVE_PENALTY = ConnectFourEvaluator.MOVE_PENALTY
 
 # Red has the bottom row at columns 0-2 and wins by playing column 3.
 RED_CAN_WIN = [0, 0, 1, 1, 2, 2]

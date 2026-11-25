@@ -2,6 +2,7 @@ import random
 
 import pytest
 
+from tree_forge import Outcome
 from connect_four.game import (
 	BOARD_COLUMNS,
 	BOARD_ROWS,
@@ -75,10 +76,6 @@ class TestConstants:
 		assert BOARD_ROWS == 6
 		assert BOARD_COLUMNS == 7
 		assert CONNECT_LENGTH == 4
-
-	def test_score_constants(self) -> None:
-		assert ConnectFourGame.TERMINAL_WIN_SCORE == 1_000_000.0
-		assert ConnectFourGame.TERMINAL_MOVE_PENALTY == 1.0
 
 
 class TestPlayer:
@@ -648,75 +645,51 @@ class TestIsTerminal:
 		assert game.is_terminal(state)
 
 
-class TestTerminalScore:
-	def test_winner_scores_the_win_value_minus_the_moves_played(
+class TestOutcome:
+	def test_winner_has_won(self, game: ConnectFourGame) -> None:
+		state = play_columns(game, RED_WINS_IN_SEVEN)
+
+		assert game.outcome(state, Player.RED) is Outcome.WIN
+
+	def test_loser_has_lost(self, game: ConnectFourGame) -> None:
+		state = play_columns(game, RED_WINS_IN_SEVEN)
+
+		assert game.outcome(state, Player.YELLOW) is Outcome.LOSS
+
+	def test_outcome_does_not_depend_on_how_long_the_game_lasted(
 		self,
 		game: ConnectFourGame,
 	) -> None:
-		state = play_columns(game, RED_WINS_IN_SEVEN)
-
-		assert game.terminal_score(state, Player.RED) == 1_000_000.0 - 7
-
-	def test_loser_scores_the_negated_value(
-		self,
-		game: ConnectFourGame,
-	) -> None:
-		state = play_columns(game, RED_WINS_IN_SEVEN)
-
-		assert game.terminal_score(state, Player.YELLOW) == -(1_000_000.0 - 7)
-
-	def test_scores_are_zero_sum(self, game: ConnectFourGame) -> None:
-		state = play_columns(game, RED_WINS_IN_NINE)
-
-		assert game.terminal_score(state, Player.RED) == -game.terminal_score(
-			state,
-			Player.YELLOW,
-		)
-
-	def test_faster_wins_score_higher(self, game: ConnectFourGame) -> None:
 		fast = play_columns(game, RED_WINS_IN_SEVEN)
 		slow = play_columns(game, RED_WINS_IN_NINE)
 
-		assert game.terminal_score(slow, Player.RED) == 1_000_000.0 - 9
-		assert game.terminal_score(fast, Player.RED) > game.terminal_score(
-			slow,
-			Player.RED,
-		)
+		assert game.outcome(fast, Player.RED) is game.outcome(slow, Player.RED)
 
-	def test_slower_losses_hurt_less(self, game: ConnectFourGame) -> None:
-		fast = play_columns(game, RED_WINS_IN_SEVEN)
-		slow = play_columns(game, RED_WINS_IN_NINE)
-
-		assert game.terminal_score(slow, Player.YELLOW) > game.terminal_score(
-			fast,
-			Player.YELLOW,
-		)
-
-	def test_yellow_win_is_scored_for_yellow(
+	def test_yellow_win_is_relative_to_yellow(
 		self,
 		game: ConnectFourGame,
 	) -> None:
 		state = play_columns(game, [0, 1, 0, 1, 0, 1, 6, 1])
 
-		assert game.terminal_score(state, Player.YELLOW) == 1_000_000.0 - 8
-		assert game.terminal_score(state, Player.RED) == -(1_000_000.0 - 8)
+		assert game.outcome(state, Player.YELLOW) is Outcome.WIN
+		assert game.outcome(state, Player.RED) is Outcome.LOSS
 
-	def test_draw_scores_zero_for_both_players(
+	def test_draw_is_a_draw_for_both_players(
 		self,
 		game: ConnectFourGame,
 	) -> None:
 		state = play_columns(game, DRAW_COLUMNS)
 
-		assert game.terminal_score(state, Player.RED) == 0.0
-		assert game.terminal_score(state, Player.YELLOW) == 0.0
+		assert game.outcome(state, Player.RED) is Outcome.DRAW
+		assert game.outcome(state, Player.YELLOW) is Outcome.DRAW
 
-	def test_win_always_outweighs_any_evaluation(
+	def test_game_does_not_assign_numerical_values(
 		self,
 		game: ConnectFourGame,
 	) -> None:
-		state = play_columns(game, RED_WINS_IN_NINE)
-
-		assert game.terminal_score(state, Player.RED) > 999_000.0
+		assert not hasattr(game, "terminal_score")
+		assert not hasattr(ConnectFourGame, "TERMINAL_WIN_SCORE")
+		assert not hasattr(ConnectFourGame, "TERMINAL_MOVE_PENALTY")
 
 	@pytest.mark.parametrize("columns", [
 		pytest.param([], id="empty"),
@@ -731,7 +704,7 @@ class TestTerminalScore:
 		state = play_columns(game, columns)
 
 		with pytest.raises(ValueError, match="nonterminal"):
-			game.terminal_score(state, Player.RED)
+			game.outcome(state, Player.RED)
 
 
 class TestPositionKey:

@@ -24,8 +24,8 @@ from tree_forge import Minimax, SearchLimits
 from tree_forge.caching import TranspositionTable
 
 
-WIN_SCORE = ConnectFourGame.TERMINAL_WIN_SCORE
-MOVE_PENALTY = ConnectFourGame.TERMINAL_MOVE_PENALTY
+WIN_SCORE = ConnectFourEvaluator.WIN_SCORE
+MOVE_PENALTY = ConnectFourEvaluator.MOVE_PENALTY
 
 GAME = ConnectFourGame()
 
@@ -423,7 +423,7 @@ class TestImmediateThreatsAreStoppedWhenDefeatIsUnavoidable:
 		pytest.param(RED_THREATENS_TWICE, id="yellow-to-move"),
 	])
 	def test_the_scores_cannot_tell_the_moves_apart(self, columns) -> None:
-		# This is why terminal_score cannot express the preference: every
+		# This is why the game's outcome cannot express the preference: every
 		# move loses on the same move, so every move is worth the same.
 		values = self.values_of_every_move(play(columns))
 

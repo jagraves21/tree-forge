@@ -4,7 +4,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from enum import Enum
 
-from tree_forge import Game
+from tree_forge import Game, Outcome
 
 
 BOARD_SIZE = 3
@@ -169,21 +169,23 @@ class TicTacToeGame(
 			for cell in row
 		)
 
-	def terminal_score(
+	def outcome(
 		self,
 		state: GameState,
 		player: Player,
-	) -> float:
-		"""Return the terminal score from a player's perspective."""
+	) -> Outcome:
+		"""Return the terminal outcome from a player's perspective."""
 		if not self.is_terminal(state):
-			raise ValueError("Cannot score a nonterminal position")
+			raise ValueError(
+				"Cannot determine the outcome of a nonterminal position"
+			)
 
 		winner = self.winner(state)
 
 		if winner is None:
-			return 0.0
+			return Outcome.DRAW
 
-		return 1.0 if winner is player else -1.0
+		return Outcome.WIN if winner is player else Outcome.LOSS
 
 	def winner(self, state: GameState) -> Player | None:
 		"""Return the winning player, or None if there is no winner."""

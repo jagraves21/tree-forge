@@ -1,10 +1,10 @@
-# Tree Forge
+# TreeForge
 
 A modular, general-purpose Python game search framework for deterministic, turn-based, two-player, zero-sum games.
 
 ## Goals
 
-Tree Forge aims to provide a clear, extensible, and efficient foundation for game-search algorithms.
+TreeForge aims to provide a clear, extensible, and efficient foundation for game-search algorithms.
 
 Planned capabilities include:
 
@@ -16,8 +16,31 @@ Planned capabilities include:
 - Position hashing.
 - Optional position canonicalization.
 - Configurable evaluation and move ordering.
+- Evaluators that value every position, terminal ones included.
 - Search limits and cancellation.
 - Search statistics.
+
+## Outcomes and Evaluation
+
+A `Game` reports whether a position is terminal and, if so, its `Outcome`
+(`WIN`, `LOSS` or `DRAW`) relative to a given player. It never assigns
+numbers. An `Evaluator` turns every position into a score, and searches
+only compare those scores.
+
+The default `Evaluator` values wins at positive infinity, losses at negative
+infinity, and draws and nonterminal positions at 0.0. Subclass it and
+override `evaluate_win`, `evaluate_loss`, `evaluate_draw` or
+`evaluate_non_terminal` to prefer faster wins, value draws differently, or
+add heuristics. Each receives the state, player, `ply` and remaining `depth`.
+
+```python
+class SoonerIsBetter(Evaluator):
+	def evaluate_win(self, state, player, ply, depth):
+		return 1000.0 - ply
+```
+
+Cached transposition-table scores are not adjusted for ply or depth, so
+keeping ply or depth dependent values consistent is up to the evaluator.
 
 ## Project Structure
 
@@ -25,21 +48,41 @@ Planned capabilities include:
 tree-forge/
 ├── pyproject.toml
 ├── README.md
+├── LICENSE
 │
 ├── src/
 │   └── tree_forge/
 │       ├── __init__.py
-│       ├── interfaces.py
-│       ├── models.py
-│       ├── search/
-│       └── core/
+│       │
+│       ├── core/
+│       │   ├── __init__.py
+│       │   ├── interfaces.py
+│       │   └── models.py
+│       │
+│       ├── algorithms/
+│       │   ├── __init__.py
+│       │   ├── minimax.py
+│       │   └── random_search.py
+│       │
+│       └── caching/
+│           ├── __init__.py
+│           ├── search_dependency_tracker.py
+│           └── transposition_table.py
 │
 ├── tests/
 │
 └── examples/
-    └── tic_tac_toe/
+    ├── tic_tac_toe/
+    │   ├── pyproject.toml
+    │   ├── README.md
+    │   └── src/
+    │       └── tic_tac_toe/
+    │
+    └── connect_four/
         ├── pyproject.toml
-        └── README.md
+        ├── README.md
+        └── src/
+            └── connect_four/
 ```
 
 ## Requirements
@@ -53,6 +96,7 @@ From the project root:
 ```bash
 pip install -e ".[test]"
 pip install -e ./examples/tic_tac_toe
+pip install -e ./examples/connect_four
 ```
 
 ## Examples
@@ -63,7 +107,8 @@ Each example has its own directory, dependencies, and installation instructions.
 
 Available examples:
 
-- [Tic-Tac-Toe](examples/tic_tac_toe/README.md)
+- [Tic-Tac-Toe](examples/tic_tac_toe/)
+- [Connect Four](examples/connect_four/)
 
 ## Testing
 
@@ -88,5 +133,5 @@ The framework will prioritize reliable reference implementations before introduc
 
 ## License
 
-Tree Forge is distributed under the [MIT License](LICENSE).
+TreeForge is distributed under the [MIT License](LICENSE).
 

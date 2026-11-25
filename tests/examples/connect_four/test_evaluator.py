@@ -11,6 +11,18 @@ from connect_four import (
 	Move,
 	Player,
 )
+from tree_forge import Outcome
+
+from .test_game import DRAW_COLUMNS, RED_WINS_IN_NINE, RED_WINS_IN_SEVEN, play_columns
+
+
+def nonterminal_value(
+	evaluator: ConnectFourEvaluator,
+	state: GameState,
+	player: Player,
+) -> float:
+	"""Return the evaluator's value of a position that is not terminal."""
+	return evaluator.evaluate(state, player, None, 0, 1)
 
 
 def mirror_state(state: GameState) -> GameState:
@@ -36,6 +48,119 @@ class TestEvaluatorConstants:
 		assert ConnectFourEvaluator.CENTER_SCORE == 3.0
 
 
+class TestTerminalValues:
+	def test_winner_scores_the_win_value_minus_the_moves_played(
+		self,
+		evaluator: ConnectFourEvaluator,
+		game: ConnectFourGame,
+	) -> None:
+		state = play_columns(game, RED_WINS_IN_SEVEN)
+
+		assert evaluator.evaluate(state, Player.RED, Outcome.WIN, 0, 1) == (
+			1_000_000.0 - 7
+		)
+
+	def test_loser_scores_the_negated_value(
+		self,
+		evaluator: ConnectFourEvaluator,
+		game: ConnectFourGame,
+	) -> None:
+		state = play_columns(game, RED_WINS_IN_SEVEN)
+
+		assert evaluator.evaluate(state, Player.YELLOW, Outcome.LOSS, 0, 1) == (
+			-(1_000_000.0 - 7)
+		)
+
+	def test_win_and_loss_are_zero_sum(
+		self,
+		evaluator: ConnectFourEvaluator,
+		game: ConnectFourGame,
+	) -> None:
+		state = play_columns(game, RED_WINS_IN_NINE)
+
+		assert evaluator.evaluate(
+			state, Player.RED, Outcome.WIN, 0, 1
+		) == -evaluator.evaluate(state, Player.YELLOW, Outcome.LOSS, 0, 1)
+
+	def test_faster_wins_score_higher(
+		self,
+		evaluator: ConnectFourEvaluator,
+		game: ConnectFourGame,
+	) -> None:
+		fast = play_columns(game, RED_WINS_IN_SEVEN)
+		slow = play_columns(game, RED_WINS_IN_NINE)
+
+		assert evaluator.evaluate(slow, Player.RED, Outcome.WIN, 0, 1) == (
+			1_000_000.0 - 9
+		)
+		assert evaluator.evaluate(
+			fast, Player.RED, Outcome.WIN, 0, 1
+		) > evaluator.evaluate(slow, Player.RED, Outcome.WIN, 0, 1)
+
+	def test_slower_losses_hurt_less(
+		self,
+		evaluator: ConnectFourEvaluator,
+		game: ConnectFourGame,
+	) -> None:
+		fast = play_columns(game, RED_WINS_IN_SEVEN)
+		slow = play_columns(game, RED_WINS_IN_NINE)
+
+		assert evaluator.evaluate(
+			slow, Player.YELLOW, Outcome.LOSS, 0, 1
+		) > evaluator.evaluate(fast, Player.YELLOW, Outcome.LOSS, 0, 1)
+
+	def test_yellow_win_is_scored_for_yellow(
+		self,
+		evaluator: ConnectFourEvaluator,
+		game: ConnectFourGame,
+	) -> None:
+		state = play_columns(game, [0, 1, 0, 1, 0, 1, 6, 1])
+
+		assert evaluator.evaluate(state, Player.YELLOW, Outcome.WIN, 0, 1) == (
+			1_000_000.0 - 8
+		)
+		assert evaluator.evaluate(state, Player.RED, Outcome.LOSS, 0, 1) == (
+			-(1_000_000.0 - 8)
+		)
+
+	def test_the_value_does_not_depend_on_ply_or_depth(
+		self,
+		evaluator: ConnectFourEvaluator,
+		game: ConnectFourGame,
+	) -> None:
+		state = play_columns(game, RED_WINS_IN_SEVEN)
+
+		values = {
+			evaluator.evaluate(state, Player.RED, Outcome.WIN, ply, depth)
+			for ply, depth in ((0, 0), (3, 5), (7, None))
+		}
+
+		assert len(values) == 1
+
+	def test_draw_scores_zero_for_both_players(
+		self,
+		evaluator: ConnectFourEvaluator,
+		game: ConnectFourGame,
+	) -> None:
+		state = play_columns(game, DRAW_COLUMNS)
+
+		assert evaluator.evaluate(state, Player.RED, Outcome.DRAW, 0, 1) == 0.0
+		assert evaluator.evaluate(state, Player.YELLOW, Outcome.DRAW, 0, 1) == 0.0
+
+	def test_win_always_outweighs_any_evaluation(
+		self,
+		evaluator: ConnectFourEvaluator,
+		game: ConnectFourGame,
+	) -> None:
+		state = play_columns(game, RED_WINS_IN_NINE)
+
+		assert evaluator.evaluate(state, Player.RED, Outcome.WIN, 0, 1) > 999_000.0
+
+	def test_win_value_constants(self) -> None:
+		assert ConnectFourEvaluator.WIN_SCORE == 1_000_000.0
+		assert ConnectFourEvaluator.MOVE_PENALTY == 1.0
+
+
 class TestEvaluate:
 	def test_empty_board_is_worth_zero(
 		self,
@@ -44,8 +169,8 @@ class TestEvaluate:
 	) -> None:
 		state = game.initial_state()
 
-		assert evaluator.evaluate(state, Player.RED) == 0.0
-		assert evaluator.evaluate(state, Player.YELLOW) == 0.0
+		assert nonterminal_value(evaluator, state, Player.RED) == 0.0
+		assert nonterminal_value(evaluator, state, Player.YELLOW) == 0.0
 
 	@pytest.mark.parametrize("rows, expected", [
 		# Bottom center lies in 7 windows (4 horizontal, 1 vertical and
@@ -98,7 +223,7 @@ class TestEvaluate:
 		rows,
 		expected: float,
 	) -> None:
-		assert evaluator.evaluate(make_state(*rows), Player.RED) == expected
+		assert nonterminal_value(evaluator, make_state(*rows), Player.RED) == expected
 
 	def test_yellow_pieces_count_against_red(
 		self,
@@ -107,8 +232,8 @@ class TestEvaluate:
 	) -> None:
 		state = make_state(*("." * 7,) * 5, "...Y...")
 
-		assert evaluator.evaluate(state, Player.RED) == -10.0
-		assert evaluator.evaluate(state, Player.YELLOW) == 10.0
+		assert nonterminal_value(evaluator, state, Player.RED) == -10.0
+		assert nonterminal_value(evaluator, state, Player.YELLOW) == 10.0
 
 	def test_every_center_column_piece_earns_the_bonus(
 		self,
@@ -123,7 +248,7 @@ class TestEvaluate:
 		# - center bonus: 2 * 3 = 6
 		state = make_state(*("." * 7,) * 4, "...R...", "...R...")
 
-		assert evaluator.evaluate(state, Player.RED) == 31.0
+		assert nonterminal_value(evaluator, state, Player.RED) == 31.0
 
 	def test_center_column_is_worth_more_than_an_edge_column(
 		self,
@@ -133,7 +258,8 @@ class TestEvaluate:
 		center = make_state(*("." * 7,) * 5, "...R...")
 		edge = make_state(*("." * 7,) * 5, "R......")
 
-		assert evaluator.evaluate(center, Player.RED) > evaluator.evaluate(
+		assert nonterminal_value(evaluator, center, Player.RED) > nonterminal_value(
+			evaluator,
 			edge,
 			Player.RED,
 		)
@@ -148,8 +274,8 @@ class TestEvaluate:
 		red_to_move = make_state(*rows, current_player=Player.RED)
 		yellow_to_move = make_state(*rows, current_player=Player.YELLOW)
 
-		assert evaluator.evaluate(red_to_move, Player.RED) == (
-			evaluator.evaluate(yellow_to_move, Player.RED)
+		assert nonterminal_value(evaluator, red_to_move, Player.RED) == (
+			nonterminal_value(evaluator, yellow_to_move, Player.RED)
 		)
 
 	def test_does_not_modify_the_state(
@@ -160,7 +286,7 @@ class TestEvaluate:
 		rows = (*("." * 7,) * 4, "..RY...", ".RRY...")
 		state = make_state(*rows)
 
-		evaluator.evaluate(state, Player.RED)
+		nonterminal_value(evaluator, state, Player.RED)
 
 		assert state == make_state(*rows)
 
@@ -197,7 +323,8 @@ class TestEvaluateOverPlayedPositions:
 		assert len(open_positions) > 500
 
 		for state in open_positions:
-			assert evaluator.evaluate(state, Player.RED) == -evaluator.evaluate(
+			assert nonterminal_value(evaluator, state, Player.RED) == -nonterminal_value(
+				evaluator,
 				state,
 				Player.YELLOW,
 			)
@@ -208,10 +335,11 @@ class TestEvaluateOverPlayedPositions:
 		open_positions: list[GameState],
 	) -> None:
 		for state in open_positions:
-			assert evaluator.evaluate(
+			assert nonterminal_value(
+				evaluator,
 				mirror_state(state),
 				Player.RED,
-			) == evaluator.evaluate(state, Player.RED)
+			) == nonterminal_value(evaluator, state, Player.RED)
 
 	def test_scores_are_finite(
 		self,
@@ -219,6 +347,6 @@ class TestEvaluateOverPlayedPositions:
 		open_positions: list[GameState],
 	) -> None:
 		assert all(
-			abs(evaluator.evaluate(state, Player.RED)) < 1_000_000.0
+			abs(nonterminal_value(evaluator, state, Player.RED)) < 1_000_000.0
 			for state in open_positions
 		)

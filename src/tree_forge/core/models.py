@@ -35,6 +35,18 @@ class CanonicalPosition(Generic[MoveT]):
 	from_canonical_move: Callable[[MoveT], MoveT]
 
 
+class Outcome(Enum):
+	"""Outcome of a terminal game state for a particular player.
+
+	An outcome is always relative to the player it was requested for:
+	when the opponent has won, the outcome for the player is LOSS.
+	"""
+
+	WIN = auto()
+	LOSS = auto()
+	DRAW = auto()
+
+
 class SearchAlgorithm(Enum):
 	"""Available search algorithms."""
 

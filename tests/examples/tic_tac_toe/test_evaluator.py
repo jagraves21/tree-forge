@@ -1,8 +1,20 @@
 import pytest
 
+from math import inf
+
 from tic_tac_toe import BOARD_SIZE, GameState, Player, TicTacToeEvaluator, TicTacToeGame
+from tree_forge import Evaluator, Outcome
 
 from .test_canonicalizer import ALL_CELLS, reachable_states
+
+
+def nonterminal_value(
+	evaluator: TicTacToeEvaluator,
+	state: GameState,
+	player: Player,
+) -> float:
+	"""Return the evaluator's value of a position that is not terminal."""
+	return evaluator.evaluate(state, player, None, 0, 1)
 
 
 def mirror_columns(state: GameState) -> GameState:
@@ -24,6 +36,48 @@ def rotate_quarter_turn(state: GameState) -> GameState:
 @pytest.fixture
 def evaluator() -> TicTacToeEvaluator:
 	return TicTacToeEvaluator()
+
+
+class TestTerminalValues:
+	def test_is_an_evaluator(self, evaluator: TicTacToeEvaluator) -> None:
+		assert isinstance(evaluator, Evaluator)
+
+	@pytest.mark.parametrize("outcome, expected", [
+		pytest.param(Outcome.WIN, inf, id="win"),
+		pytest.param(Outcome.LOSS, -inf, id="loss"),
+		pytest.param(Outcome.DRAW, 0.0, id="draw"),
+	])
+	def test_results_keep_the_default_values(
+		self,
+		evaluator: TicTacToeEvaluator,
+		outcome: Outcome,
+		expected: float,
+	) -> None:
+		state = GameState()
+
+		assert evaluator.evaluate(state, Player.X, outcome, 0, 1) == expected
+
+	def test_a_win_outranks_every_heuristic_score(
+		self,
+		evaluator: TicTacToeEvaluator,
+	) -> None:
+		state = GameState()
+
+		assert evaluator.evaluate(state, Player.X, Outcome.WIN, 0, 1) > (
+			nonterminal_value(evaluator, state, Player.X)
+		)
+
+	def test_nonterminal_positions_use_the_heuristic(
+		self,
+		evaluator: TicTacToeEvaluator,
+	) -> None:
+		state = GameState()
+		state.board[1][1] = Player.X
+
+		assert evaluator.evaluate_non_terminal(state, Player.X, 0, 1) == (
+			nonterminal_value(evaluator, state, Player.X)
+		)
+		assert nonterminal_value(evaluator, state, Player.X) > 0.0
 
 
 class TestEvaluatorConstants:
@@ -55,8 +109,8 @@ class TestEvaluate:
 	) -> None:
 		state = GameState()
 
-		assert evaluator.evaluate(state, Player.X) == 0.0
-		assert evaluator.evaluate(state, Player.O) == 0.0
+		assert nonterminal_value(evaluator, state, Player.X) == 0.0
+		assert nonterminal_value(evaluator, state, Player.O) == 0.0
 
 	@pytest.mark.parametrize("rows, expected", [
 		# One open line scores 1; the center adds 3. The center lies on
@@ -82,7 +136,7 @@ class TestEvaluate:
 		rows,
 		expected: float,
 	) -> None:
-		assert evaluator.evaluate(make_state(*rows), Player.X) == expected
+		assert nonterminal_value(evaluator, make_state(*rows), Player.X) == expected
 
 	def test_opponent_pieces_count_against_the_player(
 		self,
@@ -91,8 +145,8 @@ class TestEvaluate:
 	) -> None:
 		state = make_state("...", ".O.", "...")
 
-		assert evaluator.evaluate(state, Player.X) == -7.0
-		assert evaluator.evaluate(state, Player.O) == 7.0
+		assert nonterminal_value(evaluator, state, Player.X) == -7.0
+		assert nonterminal_value(evaluator, state, Player.O) == 7.0
 
 	def test_line_with_both_players_scores_nothing(
 		self,
@@ -104,7 +158,8 @@ class TestEvaluate:
 
 		# Blocking row 0 removes +1 for X and the O's own lines count
 		# against X, so the blocked position is strictly worse for X.
-		assert evaluator.evaluate(blocked, Player.X) < evaluator.evaluate(
+		assert nonterminal_value(evaluator, blocked, Player.X) < nonterminal_value(
+			evaluator,
 			unblocked,
 			Player.X,
 		)
@@ -117,7 +172,8 @@ class TestEvaluate:
 		x_to_move = make_state("XX.", ".O.", "...", current_player=Player.X)
 		o_to_move = make_state("XX.", ".O.", "...", current_player=Player.O)
 
-		assert evaluator.evaluate(x_to_move, Player.X) == evaluator.evaluate(
+		assert nonterminal_value(evaluator, x_to_move, Player.X) == nonterminal_value(
+			evaluator,
 			o_to_move,
 			Player.X,
 		)
@@ -130,7 +186,7 @@ class TestEvaluate:
 		state = make_state("XX.", ".O.", "...")
 		before = make_state("XX.", ".O.", "...")
 
-		evaluator.evaluate(state, Player.X)
+		nonterminal_value(evaluator, state, Player.X)
 
 		assert state == before
 
@@ -153,7 +209,8 @@ class TestEvaluateOverAllPositions:
 		open_states: list[GameState],
 	) -> None:
 		for state in open_states:
-			assert evaluator.evaluate(state, Player.X) == -evaluator.evaluate(
+			assert nonterminal_value(evaluator, state, Player.X) == -nonterminal_value(
+				evaluator,
 				state,
 				Player.O,
 			)
@@ -164,10 +221,11 @@ class TestEvaluateOverAllPositions:
 		open_states: list[GameState],
 	) -> None:
 		for state in open_states:
-			score = evaluator.evaluate(state, Player.X)
+			score = nonterminal_value(evaluator, state, Player.X)
 
-			assert evaluator.evaluate(mirror_columns(state), Player.X) == score
-			assert evaluator.evaluate(
+			assert nonterminal_value(evaluator, mirror_columns(state), Player.X) == score
+			assert nonterminal_value(
+				evaluator,
 				rotate_quarter_turn(state),
 				Player.X,
 			) == score

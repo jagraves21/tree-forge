@@ -11,7 +11,16 @@ from .game import (
 
 
 class ConnectFourEvaluator(Evaluator[GameState, Player]):
-	"""Evaluate Connect Four positions from a player's perspective."""
+	"""Evaluate Connect Four positions from a player's perspective.
+
+	A win is worth WIN_SCORE minus a penalty for every move played so
+	far, so faster wins are preferred. A loss is its negation, so
+	slower losses are preferred. Draws are worth zero. Nonterminal
+	positions are scored with a line-counting heuristic.
+	"""
+
+	WIN_SCORE = 1_000_000.0
+	MOVE_PENALTY = 1.0
 
 	LINE_SCORES = {
 		1: 1.0,
@@ -21,7 +30,31 @@ class ConnectFourEvaluator(Evaluator[GameState, Player]):
 
 	CENTER_SCORE = 3.0
 
-	def evaluate(self, state: GameState, player: Player) -> float:
+	def evaluate_win(
+		self,
+		state: GameState,
+		player: Player,
+		ply: int,
+		depth: int | None,
+	) -> float:
+		return self.WIN_SCORE - state.move_count * self.MOVE_PENALTY
+
+	def evaluate_loss(
+		self,
+		state: GameState,
+		player: Player,
+		ply: int,
+		depth: int | None,
+	) -> float:
+		return -self.WIN_SCORE + state.move_count * self.MOVE_PENALTY
+
+	def evaluate_non_terminal(
+		self,
+		state: GameState,
+		player: Player,
+		ply: int,
+		depth: int | None,
+	) -> float:
 		opponent = player.opponent
 		score = 0.0
 

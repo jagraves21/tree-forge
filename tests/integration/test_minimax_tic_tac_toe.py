@@ -1,3 +1,5 @@
+from math import inf
+
 import pytest
 
 from tic_tac_toe import (
@@ -9,7 +11,7 @@ from tic_tac_toe import (
 	TicTacToeGame,
 	TicTacToeMoveOrdering,
 )
-from tree_forge import Minimax, SearchLimits
+from tree_forge import Minimax, Outcome, SearchLimits
 
 
 FULL_DEPTH = SearchLimits(max_depth=9)
@@ -167,7 +169,7 @@ class TestMinimaxTicTacToeTactics:
 		result = make_search(game, alpha_beta=True).search(state)
 
 		assert result.best_move == Move(0, 2)
-		assert result.score == 1.0
+		assert result.score == inf
 
 	def test_blocks_an_immediate_loss(self, game: TicTacToeGame) -> None:
 		# O to move; X threatens to complete the top row.
@@ -189,7 +191,7 @@ class TestMinimaxTicTacToeTactics:
 
 		result = make_search(game, **CONFIGURATIONS[name]).search(state)
 
-		assert result.score == 1.0
+		assert result.score == inf
 		assert result.best_move == Move(1, 1)
 
 	def test_sees_that_the_double_threat_cannot_be_stopped(
@@ -205,7 +207,7 @@ class TestMinimaxTicTacToeTactics:
 		result = make_search(game, alpha_beta=True).search(state)
 
 		assert game.current_player(state) is Player.O
-		assert result.score == -1.0
+		assert result.score == -inf
 
 
 class TestSelfPlay:
@@ -234,7 +236,7 @@ class TestSelfPlay:
 			game.make_move(state, result.best_move)
 
 		assert game.winner(state) is None
-		assert game.terminal_score(state, Player.X) == 0.0
+		assert game.outcome(state, Player.X) is Outcome.DRAW
 
 	def test_unpruned_players_draw_from_a_late_position(
 		self,
