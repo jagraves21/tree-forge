@@ -11,7 +11,11 @@ from .evaluator import TicTacToeEvaluator
 
 from .canonicalizer import TicTacToeCanonicalizer
 
-from .move_ordering import TicTacToeMoveOrdering
+from .move_ordering import (
+	TicTacToeMoveOrdering,
+	RandomizedTicTacToeMoveOrdering,
+	RandomTicTacToeMoveOrdering,
+)
 
 
 __all__ = [
@@ -27,5 +31,7 @@ __all__ = [
 	"TicTacToeCanonicalizer",
 
 	"TicTacToeMoveOrdering",
+	"RandomizedTicTacToeMoveOrdering",
+	"RandomTicTacToeMoveOrdering",
 ]
 
