@@ -54,15 +54,15 @@ Player-specific settings override the corresponding global settings.
 
 | Option | Description | Default |
 |---|---|---|
-| `--depth` | Maximum search depth | `9` |
-| `--x-depth` | X's maximum search depth | Global depth |
-| `--o-depth` | O's maximum search depth | Global depth |
-| `--alpha-beta` | Enable alpha-beta pruning | Disabled |
-| `--move-ordering` | Select a move-ordering strategy | `none` |
-| `--evaluator` | Enable the Tic-Tac-Toe heuristic evaluator | Disabled |
-| `--canonicalization` | Enable board-symmetry canonicalization | Disabled |
-| `--transposition-table` | Enable transposition-table caching | Disabled |
-| `--dependency-tracking` | Enable transposition-table dependency tracking | Disabled |
+| `--depth` | Maximum search depth. | `9` |
+| `--x-depth` | X's maximum search depth. | Global depth |
+| `--o-depth` | O's maximum search depth. | Global depth |
+| `--alpha-beta` | Enable alpha-beta pruning. | Disabled |
+| `--move-ordering` | Select a move-ordering strategy. | `none` |
+| `--evaluator` | Enable the Tic-Tac-Toe heuristic evaluator. | Disabled |
+| `--canonicalization` | Enable board-symmetry canonicalization. | Disabled |
+| `--transposition-table` | Enable transposition-table caching. | Disabled |
+| `--dependency-tracking` | Enable transposition-table dependency tracking. | Disabled |
 
 Each search enhancement also supports player-specific options using the `--x-` and `--o-` prefixes.
 
@@ -84,10 +84,10 @@ Three move-ordering strategies are provided:
 
 | Strategy | Description |
 |---|---|
-| `none` | Use the game's original legal-move order |
-| `positional` | Prefer the center, then corners, then edges |
-| `randomized` | Preserve positional priorities while shuffling moves within each priority group |
-| `random` | Randomly shuffle all legal moves |
+| `none` | Use the game's original legal-move order. |
+| `positional` | Prefer the center, then corners, then edges. |
+| `randomized` | Preserve positional priorities while shuffling moves within each priority group. |
+| `random` | Randomly shuffle all legal moves. |
 
 Example:
 
@@ -168,7 +168,18 @@ python -m tic_tac_toe.main \
 One particularly interesting way to use this example is to run two Minimax players against each other with persistent transposition tables and dependency tracking:
 
 ```bash
-python -m tic_tac_toe.main --x-player minimax --o-player minimax --alpha-beta --canonicalization --transposition-table --dependency-tracking --move-ordering random --depth 2 --games 1000 --delay 0 --quiet
+python -m tic_tac_toe.main \
+	--x-player minimax \
+	--o-player minimax \
+	--alpha-beta \
+	--canonicalization \
+	--transposition-table \
+	--dependency-tracking \
+	--move-ordering random \
+	--depth 2 \
+	--games 1000 \
+	--delay 0 \
+	--quiet
 ```
 
 This configuration creates an interesting experiment:
