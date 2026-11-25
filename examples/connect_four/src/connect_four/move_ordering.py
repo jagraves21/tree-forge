@@ -7,7 +7,6 @@ from .game import (
 	BOARD_COLUMNS,
 	BOARD_ROWS,
 	CONNECT_LENGTH,
-	ConnectFourGame,
 	GameState,
 	Move,
 	Player,
@@ -43,9 +42,6 @@ class ConnectFourMoveOrdering(
 	)
 
 	_OFF_BOARD = object()
-
-	def __init__(self, game: ConnectFourGame) -> None:
-		self.game = game
 
 	@staticmethod
 	def _playable_row(
@@ -216,10 +212,11 @@ class ConnectFourMoveOrdering(
 		return sorted(moves, key=priority)
 
 
-class RandomConnectFourMoveOrdering(
+class RandomizedConnectFourMoveOrdering(
 	ConnectFourMoveOrdering
 ):
-	"""Order Connect Four moves tactically, randomly within ties.
+	"""Order Connect Four moves tactically, randomly shuffling
+	moves within each priority group.
 
 	Moves are grouped by tactical priority as in
 	ConnectFourMoveOrdering. The order within each group
@@ -230,10 +227,8 @@ class RandomConnectFourMoveOrdering(
 
 	def __init__(
 		self,
-		game: ConnectFourGame,
 		rng: random.Random | None = None,
 	) -> None:
-		super().__init__(game)
 		self.rng = rng or random.Random()
 
 	def order_moves(
@@ -263,6 +258,33 @@ class RandomConnectFourMoveOrdering(
 			group = groups[key]
 			self.rng.shuffle(group)
 			ordered.extend(group)
+
+		return ordered
+
+
+class RandomConnectFourMoveOrdering(
+	MoveOrdering[GameState, Move, Player]
+):
+	"""Order Connect Four moves randomly, ignoring tactical
+	priorities and priority groups.
+
+	The state is not modified.
+	"""
+
+	def __init__(
+		self,
+		rng: random.Random | None = None,
+	) -> None:
+		self.rng = rng or random.Random()
+
+	def order_moves(
+		self,
+		state: GameState,
+		moves: Sequence[Move],
+		player: Player,
+	) -> list[Move]:
+		ordered = list(moves)
+		self.rng.shuffle(ordered)
 
 		return ordered
 

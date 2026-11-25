@@ -331,7 +331,7 @@ class TestConnectFourIterativeDeepening:
 				depth,
 				table,
 				alpha_beta=True,
-				move_ordering=ConnectFourMoveOrdering(game),
+				move_ordering=ConnectFourMoveOrdering(),
 			).search(state)
 			reference = Minimax(
 				game,
