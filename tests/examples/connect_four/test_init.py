@@ -16,6 +16,7 @@ EXPECTED_EXPORTS = {
 	"ConnectFourEvaluator": evaluator,
 	"ConnectFourCanonicalizer": canonicalizer,
 	"ConnectFourMoveOrdering": move_ordering,
+	"RandomizedConnectFourMoveOrdering": move_ordering,
 	"RandomConnectFourMoveOrdering": move_ordering,
 }
 

@@ -18,6 +18,7 @@ from connect_four import (
 	GameState,
 	Move,
 	Player,
+	RandomizedConnectFourMoveOrdering,
 	RandomConnectFourMoveOrdering,
 )
 from tree_forge import Minimax, SearchLimits
@@ -190,13 +191,13 @@ CONFIGURATIONS = {
 	"alpha-beta-table-ordering": lambda: dict(
 		alpha_beta=True,
 		canonicalizer=ConnectFourCanonicalizer(),
-		move_ordering=ConnectFourMoveOrdering(GAME),
+		move_ordering=ConnectFourMoveOrdering(),
 	),
 	"alpha-beta-tracked-ordering": lambda: dict(
 		alpha_beta=True,
 		canonicalizer=ConnectFourCanonicalizer(),
 		transposition_table=TranspositionTable(dependency_tracking=True),
-		move_ordering=ConnectFourMoveOrdering(GAME),
+		move_ordering=ConnectFourMoveOrdering(),
 	),
 }
 
@@ -439,9 +440,14 @@ class TestImmediateThreatsAreStoppedWhenDefeatIsUnavoidable:
 		assert result.best_move == Move(0)
 
 	@pytest.mark.parametrize("seed", range(10))
-	def test_random_ordering_still_stops_a_threat(self, seed: int) -> None:
+	def test_randomized_ordering_still_stops_a_threat(
+		self,
+		seed: int,
+	) -> None:
 		state = play(YELLOW_THREATENS_TWICE)
-		ordering = RandomConnectFourMoveOrdering(GAME, random.Random(seed))
+		ordering = RandomizedConnectFourMoveOrdering(
+			random.Random(seed),
+		)
 
 		result = search(
 			4,

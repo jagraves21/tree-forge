@@ -194,7 +194,7 @@ class TestMinimaxConnectFourConfigurations:
 			4,
 			alpha_beta=True,
 			canonicalizer=ConnectFourCanonicalizer(),
-			move_ordering=ConnectFourMoveOrdering(game),
+			move_ordering=ConnectFourMoveOrdering(),
 		).search(state)
 
 		assert ordered.score == reference.score
@@ -229,7 +229,7 @@ class TestMinimaxConnectFourConfigurations:
 			4,
 			alpha_beta=True,
 			canonicalizer=ConnectFourCanonicalizer(),
-			move_ordering=ConnectFourMoveOrdering(game),
+			move_ordering=ConnectFourMoveOrdering(),
 		).search(state)
 
 		assert state == expected
@@ -245,7 +245,7 @@ class TestConnectFourSelfPlay:
 			3,
 			alpha_beta=True,
 			canonicalizer=ConnectFourCanonicalizer(),
-			move_ordering=ConnectFourMoveOrdering(game),
+			move_ordering=ConnectFourMoveOrdering(),
 		)
 		state: GameState = game.initial_state()
 		moves_played = 0
