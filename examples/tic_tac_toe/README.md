@@ -30,7 +30,7 @@ python -m tic_tac_toe.main
 - Two-player turn-based gameplay.
 - Legal move generation.
 - Terminal-state detection.
-- Win, loss, and draw scoring.
+- Win, loss, and draw outcomes (valued by an `Evaluator`).
 - Make/unmake move support.
 
 ## Purpose

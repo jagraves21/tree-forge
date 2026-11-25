@@ -4,7 +4,13 @@ from .game import GameState, Player
 
 
 class TicTacToeEvaluator(Evaluator[GameState, Player]):
-	"""Evaluate Tic-Tac-Toe positions from a player's perspective."""
+	"""Evaluate Tic-Tac-Toe positions from a player's perspective.
+
+	Wins, losses and draws keep the default values of Evaluator
+	(positive infinity, negative infinity and zero), so any win
+	outranks every heuristic score. Nonterminal positions are scored
+	with a simple line-counting heuristic.
+	"""
 
 	WINNING_LINES = (
 		# Rows
@@ -28,7 +34,13 @@ class TicTacToeEvaluator(Evaluator[GameState, Player]):
 	CENTER_SCORE = 3.0
 	CORNER_SCORE = 1.0
 
-	def evaluate(self, state: GameState, player: Player) -> float:
+	def evaluate_non_terminal(
+		self,
+		state: GameState,
+		player: Player,
+		ply: int,
+		depth: int | None,
+	) -> float:
 		opponent = player.opponent
 		score = 0.0
 
