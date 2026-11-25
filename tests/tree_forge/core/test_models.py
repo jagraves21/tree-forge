@@ -5,6 +5,7 @@ import pytest
 
 from tree_forge.core.models import (
 	CanonicalPosition,
+	Outcome,
 	SearchAlgorithm,
 	SearchConfig,
 	SearchLimits,
@@ -84,6 +85,29 @@ class TestCanonicalPosition:
 		second = CanonicalPosition[int]("second", identity, identity)
 
 		assert first != second
+
+
+class TestOutcome:
+	def test_defines_expected_outcomes(self) -> None:
+		assert {outcome.name for outcome in Outcome} == {
+			"WIN",
+			"LOSS",
+			"DRAW",
+		}
+
+	def test_outcomes_have_distinct_values(self) -> None:
+		values = [outcome.value for outcome in Outcome]
+
+		assert len(values) == len(set(values))
+
+	def test_outcomes_are_looked_up_by_name(self) -> None:
+		assert Outcome["WIN"] is Outcome.WIN
+		assert Outcome["LOSS"] is Outcome.LOSS
+		assert Outcome["DRAW"] is Outcome.DRAW
+
+	def test_outcomes_are_not_numbers(self) -> None:
+		# The numerical value of a result is decided by an evaluator.
+		assert not any(isinstance(outcome, (int, float)) for outcome in Outcome)
 
 
 class TestSearchAlgorithm:

@@ -2,6 +2,7 @@ import random
 
 import pytest
 
+from tree_forge import Outcome
 from tic_tac_toe.game import (
 	BOARD_SIZE,
 	GameState,
@@ -632,7 +633,7 @@ class TestIsTerminal:
 		assert not game.is_terminal(make_state("XOX", "OXO", "OX."))
 
 
-class TestTerminalScore:
+class TestOutcome:
 	@pytest.fixture
 	def won_state(self, game: TicTacToeGame) -> GameState:
 		state = game.initial_state()
@@ -640,58 +641,64 @@ class TestTerminalScore:
 
 		return state
 
-	def test_winner_scores_one(
+	def test_winner_has_won(
 		self,
 		game: TicTacToeGame,
 		won_state: GameState,
 	) -> None:
-		assert game.terminal_score(won_state, Player.X) == 1.0
+		assert game.outcome(won_state, Player.X) is Outcome.WIN
 
-	def test_loser_scores_minus_one(
+	def test_loser_has_lost(
 		self,
 		game: TicTacToeGame,
 		won_state: GameState,
 	) -> None:
-		assert game.terminal_score(won_state, Player.O) == -1.0
+		assert game.outcome(won_state, Player.O) is Outcome.LOSS
 
-	def test_scores_are_zero_sum(
-		self,
-		game: TicTacToeGame,
-		won_state: GameState,
-	) -> None:
-		assert game.terminal_score(won_state, Player.X) == -game.terminal_score(
-			won_state,
-			Player.O,
-		)
-
-	def test_draw_scores_zero_for_both_players(
+	def test_draw_is_a_draw_for_both_players(
 		self,
 		game: TicTacToeGame,
 		make_state,
 	) -> None:
 		state = make_state(*DRAW_ROWS)
 
-		assert game.terminal_score(state, Player.X) == 0.0
-		assert game.terminal_score(state, Player.O) == 0.0
+		assert game.outcome(state, Player.X) is Outcome.DRAW
+		assert game.outcome(state, Player.O) is Outcome.DRAW
 
-	def test_second_player_win_is_scored_for_o(
+	def test_second_player_win_is_relative_to_o(
 		self,
 		game: TicTacToeGame,
 		make_state,
 	) -> None:
 		state = make_state("OOO", "XX.", "X..")
 
-		assert game.terminal_score(state, Player.O) == 1.0
-		assert game.terminal_score(state, Player.X) == -1.0
+		assert game.outcome(state, Player.O) is Outcome.WIN
+		assert game.outcome(state, Player.X) is Outcome.LOSS
 
-	def test_score_does_not_depend_on_the_player_to_move(
+	def test_outcome_does_not_depend_on_the_player_to_move(
 		self,
 		game: TicTacToeGame,
 		make_state,
 	) -> None:
 		state = make_state("XXX", "OO.", "...", current_player=Player.X)
 
-		assert game.terminal_score(state, Player.X) == 1.0
+		assert game.outcome(state, Player.X) is Outcome.WIN
+
+	def test_a_win_for_one_player_is_a_loss_for_the_other(
+		self,
+		game: TicTacToeGame,
+		won_state: GameState,
+	) -> None:
+		assert {
+			game.outcome(won_state, Player.X),
+			game.outcome(won_state, Player.O),
+		} == {Outcome.WIN, Outcome.LOSS}
+
+	def test_game_does_not_assign_numerical_values(
+		self,
+		game: TicTacToeGame,
+	) -> None:
+		assert not hasattr(game, "terminal_score")
 
 	@pytest.mark.parametrize("rows", [
 		pytest.param(("...", "...", "..."), id="empty"),
@@ -705,7 +712,7 @@ class TestTerminalScore:
 		rows,
 	) -> None:
 		with pytest.raises(ValueError, match="nonterminal"):
-			game.terminal_score(make_state(*rows), Player.X)
+			game.outcome(make_state(*rows), Player.X)
 
 
 class TestDisplay:

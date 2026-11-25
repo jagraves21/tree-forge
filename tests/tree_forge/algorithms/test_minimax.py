@@ -1,15 +1,20 @@
-from itertools import permutations
+import inspect
+from itertools import permutations, product
+from math import inf
 from unittest.mock import patch
 
 import pytest
 
+from tree_forge.algorithms import minimax as minimax_module
 from tree_forge.algorithms.minimax import Minimax
 from tree_forge.caching import (
 	TranspositionBound,
 	TranspositionEntry,
 	TranspositionTable,
 )
+from tree_forge.core.interfaces import Evaluator, Game
 from tree_forge.core.models import (
+	Outcome,
 	SearchLimits,
 	SearchResult,
 	SearchTerminationReason,
@@ -38,8 +43,41 @@ from .conftest import (
 cached = TranspositionEntry.from_bound
 
 
-def make_search(game: TreeGame, depth: int | None = 2, **kwargs) -> Minimax:
-	return Minimax(game, limits=SearchLimits(max_depth=depth), **kwargs)
+def make_minimax(game: TreeGame, **kwargs) -> Minimax:
+	"""Build a Minimax whose evaluator supplies the tree's terminal scores.
+
+	Games only report outcomes, so the numbers in the tree's terminal
+	scores reach the search through the evaluator.
+	"""
+	kwargs.setdefault("evaluator", TableEvaluator(terminal_scores=game.scores))
+
+	return Minimax(game, **kwargs)
+
+
+def make_search(
+	game: TreeGame,
+	depth: int | None = 2,
+	evaluator: Evaluator | None = None,
+	**kwargs,
+) -> Minimax:
+	"""Build a Minimax search over a tree game.
+
+	Games only report outcomes, so the numbers in the tree's terminal
+	scores reach the search through the evaluator. A TableEvaluator
+	without terminal scores of its own is given the game's.
+	"""
+	if evaluator is None:
+		evaluator = TableEvaluator()
+
+	if isinstance(evaluator, TableEvaluator) and evaluator.terminal_scores is None:
+		evaluator.terminal_scores = game.scores
+
+	return Minimax(
+		game,
+		evaluator=evaluator,
+		limits=SearchLimits(max_depth=depth),
+		**kwargs,
+	)
 
 
 class TestMinimaxInit:
@@ -47,7 +85,7 @@ class TestMinimaxInit:
 		search = Minimax(game)
 
 		assert search.game is game
-		assert search.evaluator is None
+		assert type(search.evaluator) is Evaluator
 		assert search.limits == SearchLimits()
 		assert search.alpha_beta is False
 		assert search.canonicalizer is None
@@ -71,6 +109,20 @@ class TestMinimaxInit:
 		assert search.limits is limits
 		assert search.alpha_beta is True
 		assert search.move_ordering is ordering
+
+	def test_creates_a_default_evaluator_when_none_is_supplied(
+		self,
+		game: TreeGame,
+	) -> None:
+		search = Minimax(game, evaluator=None)
+
+		assert type(search.evaluator) is Evaluator
+
+	def test_default_evaluators_are_not_shared_between_searches(
+		self,
+		game: TreeGame,
+	) -> None:
+		assert Minimax(game).evaluator is not Minimax(game).evaluator
 
 	def test_uses_default_limits_when_none_are_supplied(
 		self,
@@ -226,7 +278,7 @@ class TestMinimaxSearch:
 		self,
 		deep_game: TreeGame,
 	) -> None:
-		result = Minimax(deep_game).search(deep_game.initial_state())
+		result = make_minimax(deep_game).search(deep_game.initial_state())
 
 		assert result.statistics.completed_depth == 4
 
@@ -309,16 +361,18 @@ class TestMinimaxRootPositions:
 
 
 class TestMinimaxEvaluator:
-	def test_leaves_are_scored_zero_without_an_evaluator(
+	def test_leaves_are_scored_zero_by_the_default_evaluator(
 		self,
 		game: TreeGame,
 	) -> None:
-		result = make_search(game, depth=1).search(game.initial_state())
+		result = Minimax(game, limits=SearchLimits(max_depth=1)).search(
+			game.initial_state()
+		)
 
 		assert result.score == 0.0
 		assert result.best_move == TreeMove("a")
 
-	def test_evaluator_is_called_at_the_depth_limit_only(
+	def test_evaluator_is_called_at_the_depth_limit(
 		self,
 		deep_game: TreeGame,
 	) -> None:
@@ -347,7 +401,33 @@ class TestMinimaxEvaluator:
 
 		assert evaluator.calls == [("A", 1), ("B", 1)]
 
-	def test_evaluator_is_not_called_for_terminal_positions(
+	def test_evaluator_always_receives_the_root_player_in_terminal_positions(
+		self,
+		game: TreeGame,
+	) -> None:
+		evaluator = TableEvaluator()
+
+		make_search(game, depth=5, evaluator=evaluator).search(
+			TreeState(current_player=2)
+		)
+
+		assert {player for _, player, *_ in evaluator.evaluations} == {2}
+
+	def test_nonterminal_positions_are_evaluated_without_an_outcome(
+		self,
+		deep_game: TreeGame,
+	) -> None:
+		evaluator = TableEvaluator()
+
+		make_search(deep_game, depth=2, evaluator=evaluator).search(
+			deep_game.initial_state()
+		)
+
+		assert {outcome for _, _, outcome, _, _ in evaluator.evaluations} == {
+			None
+		}
+
+	def test_terminal_positions_are_delegated_to_the_evaluator(
 		self,
 		game: TreeGame,
 	) -> None:
@@ -357,7 +437,80 @@ class TestMinimaxEvaluator:
 			game.initial_state()
 		)
 
+		assert sorted(node for node, *_ in evaluator.evaluations) == [
+			"a1",
+			"a2",
+			"b1",
+			"b2",
+		]
 		assert evaluator.calls == []
+
+	def test_terminal_positions_carry_the_outcome_for_the_root_player(
+		self,
+	) -> None:
+		# Player 1 wins at "w", loses at "l" and draws at "d".
+		game = TreeGame(
+			{"root": ("w", "l", "d")},
+			{"w": 1.0, "l": -1.0, "d": 0.0},
+		)
+
+		for root_player, expected in (
+			(1, {"w": Outcome.WIN, "l": Outcome.LOSS, "d": Outcome.DRAW}),
+			(2, {"w": Outcome.LOSS, "l": Outcome.WIN, "d": Outcome.DRAW}),
+		):
+			evaluator = TableEvaluator()
+
+			make_search(game, depth=1, evaluator=evaluator).search(
+				TreeState(current_player=root_player)
+			)
+
+			assert {
+				node: outcome for node, _, outcome, _, _ in evaluator.evaluations
+			} == expected
+
+	def test_ply_and_remaining_depth_are_passed_to_the_evaluator(
+		self,
+		deep_game: TreeGame,
+	) -> None:
+		evaluator = TableEvaluator()
+
+		make_search(deep_game, depth=3, evaluator=evaluator).search(
+			deep_game.initial_state()
+		)
+
+		# Every position is evaluated at a leaf, three plies below the
+		# root, with no depth left.
+		assert {(ply, depth) for *_, ply, depth in evaluator.evaluations} == {
+			(3, 0)
+		}
+
+	def test_terminal_positions_above_the_depth_limit_keep_their_depth(
+		self,
+		game: TreeGame,
+	) -> None:
+		evaluator = TableEvaluator()
+
+		make_search(game, depth=5, evaluator=evaluator).search(
+			game.initial_state()
+		)
+
+		# Terminal positions two plies below the root, with three plies
+		# of the search left.
+		assert {(ply, depth) for *_, ply, depth in evaluator.evaluations} == {
+			(2, 3)
+		}
+
+	def test_depth_is_none_when_the_search_has_no_depth_limit(
+		self,
+		game: TreeGame,
+	) -> None:
+		evaluator = TableEvaluator()
+
+		make_search(game, depth=None, evaluator=evaluator).search(
+			game.initial_state()
+		)
+
+		assert {depth for *_, depth in evaluator.evaluations} == {None}
 
 	def test_evaluated_scores_are_minimaxed_through_the_tree(
 		self,
@@ -372,6 +525,254 @@ class TestMinimaxEvaluator:
 
 		assert result.best_move == TreeMove("A")
 		assert result.score == 1.0
+
+
+class RecordingGame(TreeGame):
+	"""Tree game that records every is_terminal() and outcome() call."""
+
+	def __init__(self, *args, **kwargs) -> None:
+		super().__init__(*args, **kwargs)
+		self.terminal_checks: list[str] = []
+		self.outcome_calls: list[tuple[str, int]] = []
+
+	def is_terminal(self, state: TreeState) -> bool:
+		self.terminal_checks.append(state.node)
+
+		return super().is_terminal(state)
+
+	def outcome(self, state: TreeState, player: int) -> Outcome:
+		self.outcome_calls.append((state.node, player))
+
+		return super().outcome(state, player)
+
+
+class ConstantEvaluator(Evaluator[TreeState, int]):
+	"""Evaluator with distinctive values that no search would invent."""
+
+	def evaluate_win(self, state, player, ply, depth) -> float:
+		return 42.0
+
+	def evaluate_loss(self, state, player, ply, depth) -> float:
+		return -7.0
+
+	def evaluate_draw(self, state, player, ply, depth) -> float:
+		return 3.5
+
+	def evaluate_non_terminal(self, state, player, ply, depth) -> float:
+		return 0.25
+
+
+class TestMinimaxDelegatesToTheEvaluator:
+	def test_terminal_values_come_only_from_the_evaluator(self) -> None:
+		# "w" is a win, "l" a loss and "d" a draw for player 1, so the
+		# root player's best move is the win, worth whatever the
+		# evaluator says.
+		game = TreeGame(
+			{"root": ("l", "d", "w")},
+			{"w": 1.0, "l": -1.0, "d": 0.0},
+		)
+
+		result = Minimax(
+			game,
+			evaluator=ConstantEvaluator(),
+			limits=SearchLimits(max_depth=1),
+		).search(game.initial_state())
+
+		assert result.best_move == TreeMove("w")
+		assert result.score == 42.0
+
+	@pytest.mark.parametrize("leaf, expected", [
+		pytest.param("l", -7.0, id="loss"),
+		pytest.param("d", 3.5, id="draw"),
+	])
+	def test_each_outcome_uses_its_own_evaluator_method(
+		self,
+		leaf: str,
+		expected: float,
+	) -> None:
+		game = TreeGame({"root": (leaf,)}, {"l": -1.0, "d": 0.0})
+
+		result = Minimax(
+			game,
+			evaluator=ConstantEvaluator(),
+			limits=SearchLimits(max_depth=1),
+		).search(game.initial_state())
+
+		assert result.score == expected
+
+	def test_the_scores_of_the_opponent_s_outcomes_are_not_negated(
+		self,
+	) -> None:
+		# Player 2 moves at "a", and the leaf is a loss for player 1, so
+		# the evaluator values it as a loss for the root player.
+		game = TreeGame({"root": ("a",), "a": ("l",)}, {"l": -1.0})
+
+		result = Minimax(
+			game,
+			evaluator=ConstantEvaluator(),
+			limits=SearchLimits(max_depth=2),
+		).search(game.initial_state())
+
+		assert result.score == -7.0
+
+	def test_nonterminal_leaves_use_the_evaluator(self) -> None:
+		game = TreeGame({"root": ("a",)}, {})
+
+		result = Minimax(
+			game,
+			evaluator=ConstantEvaluator(),
+			limits=SearchLimits(max_depth=1),
+		).search(game.initial_state())
+
+		assert result.score == 0.25
+
+	def test_the_game_is_asked_for_an_outcome_only_at_terminal_positions(
+		self,
+	) -> None:
+		game = RecordingGame(SHALLOW_TREE, SHALLOW_SCORES)
+
+		Minimax(
+			game,
+			evaluator=ConstantEvaluator(),
+			limits=SearchLimits(max_depth=3),
+		).search(game.initial_state())
+
+		assert sorted(node for node, _ in game.outcome_calls) == [
+			"a1",
+			"a2",
+			"b1",
+			"b2",
+		]
+		assert {player for _, player in game.outcome_calls} == {1}
+
+	def test_terminal_positions_are_found_with_is_terminal(self) -> None:
+		game = RecordingGame(SHALLOW_TREE, SHALLOW_SCORES)
+
+		Minimax(
+			game,
+			evaluator=ConstantEvaluator(),
+			limits=SearchLimits(max_depth=3),
+		).search(game.initial_state())
+
+		assert {"root", "a", "b", "a1", "a2", "b1", "b2"} <= set(
+			game.terminal_checks
+		)
+
+	def test_the_game_is_not_asked_for_an_outcome_at_the_depth_limit(
+		self,
+	) -> None:
+		game = RecordingGame(SHALLOW_TREE, SHALLOW_SCORES)
+
+		Minimax(
+			game,
+			evaluator=ConstantEvaluator(),
+			limits=SearchLimits(max_depth=1),
+		).search(game.initial_state())
+
+		assert game.outcome_calls == []
+
+	def test_games_no_longer_provide_terminal_scores(
+		self,
+		game: TreeGame,
+	) -> None:
+		assert not hasattr(game, "terminal_score")
+		assert not hasattr(Game, "terminal_score")
+
+	def test_the_search_contains_no_outcome_scores_of_its_own(self) -> None:
+		source = inspect.getsource(minimax_module)
+
+		assert "terminal_score" not in source
+
+	def test_the_default_evaluator_values_wins_and_losses_at_infinity(
+		self,
+	) -> None:
+		# Player 1 wins at "w" and loses at "l".
+		game = TreeGame(
+			{"root": ("w",), "x": ("l",)},
+			{"w": 1.0, "l": -1.0},
+		)
+
+		assert Minimax(game).search(TreeState("root", 1)).score == inf
+		assert Minimax(game).search(TreeState("x", 1)).score == -inf
+
+	def test_the_default_evaluator_values_draws_and_other_positions_at_zero(
+		self,
+	) -> None:
+		game = TreeGame({"root": ("d",), "x": ("y",)}, {"d": 0.0})
+
+		drawn = Minimax(game).search(TreeState("root", 1))
+		unfinished = Minimax(game, limits=SearchLimits(max_depth=1)).search(
+			TreeState("x", 1)
+		)
+
+		assert drawn.score == 0.0
+		assert unfinished.score == 0.0
+
+	@pytest.mark.parametrize("alpha_beta", [False, True])
+	def test_searching_with_the_default_evaluator_picks_the_drawing_line(
+		self,
+		alpha_beta: bool,
+	) -> None:
+		# Player 2 can answer "a" with a win, so player 1 plays "b".
+		game = TreeGame(
+			{"root": ("a", "b"), "a": ("a1", "a2"), "b": ("b1", "b2")},
+			{"a1": 1.0, "a2": -1.0, "b1": 0.0, "b2": 1.0},
+		)
+
+		result = Minimax(game, alpha_beta=alpha_beta).search(
+			game.initial_state()
+		)
+
+		assert result.best_move == TreeMove("b")
+		assert result.score == 0.0
+
+	def test_a_custom_evaluator_can_prefer_faster_wins(self) -> None:
+		class SoonerIsBetter(Evaluator[TreeState, int]):
+			def evaluate_win(self, state, player, ply, depth) -> float:
+				return 100.0 - ply
+
+		# Player 1 wins at "slow" after three plies and at "fast" after
+		# one. "slow" is listed first.
+		game = TreeGame(
+			{"root": ("x", "fast"), "x": ("y",), "y": ("slow",)},
+			{"slow": 1.0, "fast": 1.0},
+		)
+
+		result = Minimax(
+			game,
+			evaluator=SoonerIsBetter(),
+			limits=SearchLimits(max_depth=None),
+		).search(game.initial_state())
+
+		assert result.best_move == TreeMove("fast")
+		assert result.score == 99.0
+
+	def test_overriding_one_method_keeps_the_other_defaults(self) -> None:
+		class DrawsAreWorthAPoint(Evaluator[TreeState, int]):
+			def evaluate_draw(self, state, player, ply, depth) -> float:
+				return 1.0
+
+		game = TreeGame(
+			{"root": ("d", "l")},
+			{"d": 0.0, "l": -1.0},
+		)
+
+		result = Minimax(
+			game,
+			evaluator=DrawsAreWorthAPoint(),
+			limits=SearchLimits(max_depth=1),
+		).search(game.initial_state())
+
+		assert result.best_move == TreeMove("d")
+		assert result.score == 1.0
+
+		loss = Minimax(
+			TreeGame({"root": ("l",)}, {"l": -1.0}),
+			evaluator=DrawsAreWorthAPoint(),
+			limits=SearchLimits(max_depth=1),
+		).search(TreeState())
+
+		assert loss.score == -inf
 
 
 class TestMinimaxStatistics:
@@ -635,7 +1036,7 @@ class TestMinimaxStatisticsAvailability:
 	def test_table_size_includes_entries_from_earlier_searches(self) -> None:
 		game = TreeGame(DISCOVERY_TREE, DISCOVERY_SCORES)
 		table = TranspositionTable()
-		search = Minimax(
+		search = make_minimax(
 			game,
 			limits=SearchLimits(max_depth=None),
 			alpha_beta=True,
@@ -982,7 +1383,7 @@ class TestMinimaxMoveOrdering:
 
 def seeded_search(game: TreeGame, cached_move: str, **kwargs) -> Minimax:
 	"""A search whose table already remembers a best move for the root."""
-	search = Minimax(
+	search = make_minimax(
 		game,
 		limits=SearchLimits(max_depth=None),
 		canonicalizer=TreeCanonicalizer(),
@@ -1055,7 +1456,7 @@ class TestMinimaxRootTies:
 		table = TranspositionTable()
 
 		def search(**kwargs) -> Minimax:
-			return Minimax(
+			return make_minimax(
 				game,
 				limits=SearchLimits(max_depth=None),
 				alpha_beta=alpha_beta,
@@ -1299,7 +1700,7 @@ class TestMinimaxTranspositionTable:
 		self,
 	) -> None:
 		game = TreeGame(SHALLOW_TREE, SHALLOW_SCORES)
-		search = Minimax(
+		search = make_minimax(
 			game,
 			limits=SearchLimits(max_depth=2),
 			alpha_beta=True,
@@ -1317,7 +1718,7 @@ class TestMinimaxTranspositionTable:
 	def test_zero_scores_are_stored_without_a_sign(self, tracking: bool) -> None:
 		game = TreeGame(SHALLOW_TREE, SHALLOW_SCORES)
 		table = TranspositionTable(dependency_tracking=tracking)
-		search = Minimax(
+		search = make_minimax(
 			game,
 			limits=SearchLimits(max_depth=1),
 			canonicalizer=TreeCanonicalizer(),
@@ -1738,7 +2139,7 @@ OPPONENT_A = ("A", 2)
 def discovery_search(**kwargs) -> tuple[TreeGame, TranspositionTable, Minimax]:
 	game = TreeGame(DISCOVERY_TREE, DISCOVERY_SCORES)
 	table = TranspositionTable(dependency_tracking=True)
-	search = Minimax(
+	search = make_minimax(
 		game,
 		limits=SearchLimits(max_depth=None),
 		alpha_beta=True,
@@ -1881,7 +2282,7 @@ class TestMinimaxDependencyTracking:
 	) -> None:
 		game = TreeGame(DISCOVERY_TREE, DISCOVERY_SCORES)
 		table = TranspositionTable(dependency_tracking=False)
-		search = Minimax(
+		search = make_minimax(
 			game,
 			limits=SearchLimits(max_depth=None),
 			alpha_beta=True,
@@ -1899,7 +2300,7 @@ class TestMinimaxDependencyTracking:
 		game, _, search = discovery_search()
 		search.search(TreeState("root", 1))
 		search.search(TreeState("B", 2))
-		reference = Minimax(
+		reference = make_minimax(
 			TreeGame(DISCOVERY_TREE, DISCOVERY_SCORES),
 			limits=SearchLimits(max_depth=None),
 		)
@@ -1923,7 +2324,7 @@ class TestMinimaxDependencyTracking:
 		tree = {**DISCOVERY_TREE, "X": ("x1",)}
 		game = TreeGame(tree, {**DISCOVERY_SCORES, "x1": 2.0})
 		table = TranspositionTable(dependency_tracking=True)
-		search = Minimax(
+		search = make_minimax(
 			game,
 			limits=SearchLimits(max_depth=None),
 			alpha_beta=True,
@@ -1945,7 +2346,7 @@ class TestMinimaxDependencyTracking:
 	def test_a_deeper_search_improves_the_positions_above(self) -> None:
 		game = TreeGame(DEEP_TREE, DEEP_SCORES)
 		table = TranspositionTable(dependency_tracking=True)
-		search = Minimax(
+		search = make_minimax(
 			game,
 			limits=SearchLimits(max_depth=2),
 			canonicalizer=TreeCanonicalizer(),
@@ -1978,7 +2379,7 @@ class TestMinimaxDependencyTracking:
 		table = TranspositionTable(dependency_tracking=True)
 
 		def make(depth: int) -> Minimax:
-			return Minimax(
+			return make_minimax(
 				game,
 				limits=SearchLimits(max_depth=depth),
 				alpha_beta=True,
@@ -2010,7 +2411,7 @@ class TestMinimaxDependencyTracking:
 		deep_game: TreeGame,
 	) -> None:
 		table = TranspositionTable(dependency_tracking=True)
-		search = Minimax(
+		search = make_minimax(
 			deep_game,
 			limits=SearchLimits(max_depth=2),
 			canonicalizer=TreeCanonicalizer(),
@@ -2042,7 +2443,7 @@ class TestMinimaxSearchOrder:
 
 	@staticmethod
 	def reference_scores() -> dict:
-		reference = Minimax(
+		reference = make_minimax(
 			TreeGame(DISCOVERY_TREE, DISCOVERY_SCORES),
 			limits=SearchLimits(max_depth=None),
 		)
@@ -2057,7 +2458,7 @@ class TestMinimaxSearchOrder:
 	def run(self, order, **kwargs) -> tuple[dict, dict]:
 		game = TreeGame(DISCOVERY_TREE, DISCOVERY_SCORES)
 		table = TranspositionTable(dependency_tracking=True)
-		search = Minimax(
+		search = make_minimax(
 			game,
 			limits=SearchLimits(max_depth=None),
 			canonicalizer=TreeCanonicalizer(),
@@ -2108,3 +2509,176 @@ class TestMinimaxSearchOrder:
 
 		for key in (("A", 2), ("root", 1), ("G", 2)):
 			assert snapshot_[key][2] is True
+
+
+class TestMinimaxInfiniteScores:
+	"""The default evaluator values wins and losses at infinity."""
+
+	OUTCOME_SCORES = (1.0, 0.0, -1.0)
+
+	@pytest.mark.parametrize("root_player", [1, 2])
+	def test_every_configuration_agrees_on_every_combination_of_outcomes(
+		self,
+		root_player: int,
+	) -> None:
+		configurations = (
+			dict(),
+			dict(alpha_beta=True),
+			dict(canonicalizer=TreeCanonicalizer()),
+			dict(alpha_beta=True, canonicalizer=TreeCanonicalizer()),
+			dict(
+				alpha_beta=True,
+				canonicalizer=TreeCanonicalizer(),
+				transposition_table=TranspositionTable(
+					dependency_tracking=True
+				),
+			),
+		)
+
+		leaves = ("a1", "a2", "b1", "b2")
+
+		for values in product(self.OUTCOME_SCORES, repeat=len(leaves)):
+			game = TreeGame(SHALLOW_TREE, dict(zip(leaves, values)))
+			results = set()
+
+			for configuration in configurations:
+				table = configuration.get("transposition_table")
+
+				if table is not None:
+					table.clear()
+
+				result = Minimax(
+					game,
+					limits=SearchLimits(max_depth=None),
+					**{
+						key: value
+						for key, value in configuration.items()
+						if key != "transposition_table"
+					},
+				).search(TreeState(current_player=root_player))
+
+				results.add((result.score, result.best_move))
+
+			assert len(results) == 1, (values, results)
+
+	@pytest.mark.parametrize("alpha_beta", [False, True])
+	@pytest.mark.parametrize("cached_move", ["a", "b", "c"])
+	def test_the_best_ranked_of_several_winning_moves_is_chosen(
+		self,
+		cached_move: str,
+		alpha_beta: bool,
+	) -> None:
+		game = TreeGame(
+			THREE_EQUAL_MOVES["tree"],
+			THREE_EQUAL_MOVES["scores"],
+		)
+		search = seeded_search(
+			game,
+			cached_move,
+			alpha_beta=alpha_beta,
+			evaluator=Evaluator(),
+		)
+
+		result = search.search(game.initial_state())
+
+		assert result.score == inf
+		assert result.best_move == TreeMove("a")
+
+	@pytest.mark.parametrize("cached_move", ["a", "b", "c"])
+	def test_the_ordering_ranks_all_winning_moves(
+		self,
+		cached_move: str,
+	) -> None:
+		game = TreeGame(
+			THREE_EQUAL_MOVES["tree"],
+			THREE_EQUAL_MOVES["scores"],
+		)
+		search = seeded_search(
+			game,
+			cached_move,
+			alpha_beta=True,
+			evaluator=Evaluator(),
+			move_ordering=ReversingMoveOrdering(),
+		)
+
+		assert search.search(game.initial_state()).best_move == TreeMove("c")
+
+	def test_moves_ranked_below_a_winning_move_are_not_searched(self) -> None:
+		game = TreeGame(
+			THREE_EQUAL_MOVES["tree"],
+			THREE_EQUAL_MOVES["scores"],
+		)
+
+		result = Minimax(
+			game,
+			limits=SearchLimits(max_depth=None),
+			alpha_beta=True,
+		).search(game.initial_state())
+
+		assert result.best_move == TreeMove("a")
+		assert game.made == ["a", "a1"]
+		assert result.statistics.cutoffs == 1
+
+	@pytest.mark.parametrize("value", [inf, -inf])
+	@pytest.mark.parametrize("alpha_beta", [False, True])
+	def test_an_infinite_score_is_stored_as_an_exact_value(
+		self,
+		value: float,
+		alpha_beta: bool,
+	) -> None:
+		class Infinite(Evaluator[TreeState, int]):
+			def evaluate_non_terminal(self, state, player, ply, depth):
+				return value
+
+		game = TreeGame({"root": ("a", "b")}, {})
+		table = TranspositionTable()
+
+		Minimax(
+			game,
+			evaluator=Infinite(),
+			limits=SearchLimits(max_depth=1),
+			alpha_beta=alpha_beta,
+			canonicalizer=TreeCanonicalizer(),
+			transposition_table=table,
+		).search(game.initial_state())
+
+		entry = table.get(("root", 1))
+
+		assert (entry.lower, entry.upper) == (value, value)
+
+	def test_cached_infinite_scores_are_reused(self) -> None:
+		# "c" is reached through both "a" and "b" and is a win.
+		game = TreeGame(
+			TRANSPOSITION_TREE,
+			{"c1": 1.0, "c2": 1.0},
+		)
+		search = Minimax(
+			game,
+			limits=SearchLimits(max_depth=None),
+			canonicalizer=TreeCanonicalizer(),
+		)
+
+		result = search.search(game.initial_state())
+
+		assert result.score == inf
+		assert result.statistics.transposition_table_hits >= 1
+		assert game.made.count("c1") == 1
+
+	def test_a_winning_move_ends_the_search_of_the_other_root_moves(
+		self,
+	) -> None:
+		game = TreeGame(
+			TRANSPOSITION_TREE,
+			{"c1": 1.0, "c2": 1.0},
+		)
+
+		result = Minimax(
+			game,
+			limits=SearchLimits(max_depth=None),
+			alpha_beta=True,
+			canonicalizer=TreeCanonicalizer(),
+		).search(game.initial_state())
+
+		assert result.score == inf
+		assert result.best_move == TreeMove("a")
+		assert "b" not in game.made

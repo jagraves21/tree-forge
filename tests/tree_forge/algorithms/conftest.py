@@ -15,7 +15,7 @@ from tree_forge.core.interfaces import (
 	Game,
 	MoveOrdering,
 )
-from tree_forge.core.models import CanonicalPosition
+from tree_forge.core.models import CanonicalPosition, Outcome
 
 
 # Two plies. Player 1 moves at the root and player 2 replies, so the
@@ -98,7 +98,10 @@ class TreeGame(Game[TreeState, TreeMove, int, TreeUndo]):
 	"""Game played on an explicit graph of named positions.
 
 	Players alternate between 1 and 2. A position listed in scores is
-	terminal and its score is from player 1's perspective. A position
+	terminal. The game only reports its outcome, which follows the
+	sign of its score from player 1's perspective: positive is a win
+	for player 1, negative a loss and zero a draw. The score itself is
+	a number for an evaluator to use (see TableEvaluator). A position
 	that is neither terminal nor listed in the tree has no legal moves.
 
 	Every make_move() and unmake_move() call is logged.
@@ -151,28 +154,86 @@ class TreeGame(Game[TreeState, TreeMove, int, TreeUndo]):
 	def is_terminal(self, state: TreeState) -> bool:
 		return state.node in self.scores
 
-	def terminal_score(self, state: TreeState, player: int) -> float:
+	def outcome(self, state: TreeState, player: int) -> Outcome:
 		if not self.is_terminal(state):
 			raise ValueError("Position is not terminal")
 
 		score = self.scores[state.node]
+		score = score if player == 1 else -score
 
-		return score if player == 1 else -score
+		if score > 0:
+			return Outcome.WIN
+
+		if score < 0:
+			return Outcome.LOSS
+
+		return Outcome.DRAW
 
 
 class TableEvaluator(Evaluator[TreeState, int]):
-	"""Evaluate positions by node name and record every call."""
+	"""Evaluate positions by node name and record every call.
+
+	Nonterminal positions are worth values[node], or default. Terminal
+	positions are worth terminal_scores[node] from player 1's
+	perspective, negated for player 2. Without terminal_scores the
+	default Evaluator values apply.
+
+	evaluations records every evaluate() call. calls records the
+	(node, player) of the nonterminal evaluations only.
+	"""
 
 	def __init__(
 		self,
 		values: Mapping[str, float] | None = None,
 		default: float = 0.0,
+		terminal_scores: Mapping[str, float] | None = None,
 	) -> None:
 		self.values = dict(values or {})
 		self.default = default
+		self.terminal_scores = (
+			dict(terminal_scores) if terminal_scores is not None else None
+		)
 		self.calls: list[tuple[str, int]] = []
+		self.evaluations: list[tuple[str, int, Outcome | None, int, int | None]] = []
 
-	def evaluate(self, state: TreeState, player: int) -> float:
+	def evaluate(
+		self,
+		state: TreeState,
+		player: int,
+		outcome: Outcome | None,
+		ply: int,
+		depth: int | None,
+	) -> float:
+		self.evaluations.append((state.node, player, outcome, ply, depth))
+
+		return super().evaluate(state, player, outcome, ply, depth)
+
+	def _terminal_value(self, state: TreeState, player: int) -> float:
+		assert self.terminal_scores is not None
+
+		score = self.terminal_scores[state.node]
+
+		return score if player == 1 else -score
+
+	def evaluate_win(self, state, player, ply, depth) -> float:
+		if self.terminal_scores is None:
+			return super().evaluate_win(state, player, ply, depth)
+
+		return self._terminal_value(state, player)
+
+	def evaluate_loss(self, state, player, ply, depth) -> float:
+		if self.terminal_scores is None:
+			return super().evaluate_loss(state, player, ply, depth)
+
+		return self._terminal_value(state, player)
+
+	def evaluate_draw(self, state, player, ply, depth) -> float:
+		if self.terminal_scores is None:
+			return super().evaluate_draw(state, player, ply, depth)
+
+		return self._terminal_value(state, player)
+
+	def evaluate_non_terminal(self, state, player, ply, depth) -> float:
 		self.calls.append((state.node, player))
 
 		return self.values.get(state.node, self.default)
@@ -181,7 +242,14 @@ class TableEvaluator(Evaluator[TreeState, int]):
 class RaisingEvaluator(Evaluator[TreeState, int]):
 	"""Evaluator that always fails."""
 
-	def evaluate(self, state: TreeState, player: int) -> float:
+	def evaluate(
+		self,
+		state: TreeState,
+		player: int,
+		outcome: Outcome | None,
+		ply: int,
+		depth: int | None,
+	) -> float:
 		raise RuntimeError("evaluation failed")
 
 

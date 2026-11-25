@@ -1,5 +1,8 @@
 from collections.abc import Hashable, Sequence
 
+import inspect
+from math import inf
+
 import pytest
 
 from tree_forge.core.interfaces import (
@@ -8,7 +11,7 @@ from tree_forge.core.interfaces import (
 	Game,
 	MoveOrdering,
 )
-from tree_forge.core.models import CanonicalPosition
+from tree_forge.core.models import CanonicalPosition, Outcome
 
 
 def stub(self, *args, **kwargs):
@@ -56,7 +59,7 @@ class TestGame:
 		"make_move": ("state", "move"),
 		"unmake_move": ("state", "move", "undo_data"),
 		"is_terminal": ("state",),
-		"terminal_score": ("state", "player"),
+		"outcome": ("state", "player"),
 	}
 
 	def test_declares_expected_abstract_methods(self) -> None:
@@ -96,30 +99,187 @@ class TestGame:
 			getattr(Game, method)(game, *arguments)
 
 
+class RecordingEvaluator(Evaluator[str, int]):
+	"""Evaluator whose terminal and nonterminal methods are all overridden."""
+
+	def __init__(self) -> None:
+		self.calls: list[tuple] = []
+
+	def evaluate_win(self, state, player, ply, depth) -> float:
+		self.calls.append(("win", state, player, ply, depth))
+
+		return 10.0
+
+	def evaluate_loss(self, state, player, ply, depth) -> float:
+		self.calls.append(("loss", state, player, ply, depth))
+
+		return -10.0
+
+	def evaluate_draw(self, state, player, ply, depth) -> float:
+		self.calls.append(("draw", state, player, ply, depth))
+
+		return 1.5
+
+	def evaluate_non_terminal(self, state, player, ply, depth) -> float:
+		self.calls.append(("non_terminal", state, player, ply, depth))
+
+		return -0.5
+
+
 class TestEvaluator:
-	def test_declares_expected_abstract_methods(self) -> None:
-		assert Evaluator.__abstractmethods__ == frozenset({"evaluate"})
+	METHODS = (
+		"evaluate_win",
+		"evaluate_loss",
+		"evaluate_draw",
+		"evaluate_non_terminal",
+	)
 
-	def test_cannot_be_instantiated_directly(self) -> None:
-		with pytest.raises(TypeError):
-			Evaluator()
+	def test_has_no_abstract_methods(self) -> None:
+		assert Evaluator.__abstractmethods__ == frozenset()
 
-	def test_cannot_be_instantiated_without_evaluate(self) -> None:
-		partial = make_partial_subclass(Evaluator, "evaluate")
+	def test_can_be_instantiated_directly_as_the_default_evaluator(
+		self,
+	) -> None:
+		assert isinstance(Evaluator(), Evaluator)
 
-		with pytest.raises(TypeError, match="evaluate"):
-			partial()
+	def test_evaluate_takes_the_state_player_outcome_ply_and_depth(
+		self,
+	) -> None:
+		parameters = inspect.signature(Evaluator.evaluate).parameters
 
-	def test_can_be_instantiated_when_complete(self) -> None:
-		evaluator = make_complete_subclass(Evaluator)()
+		assert list(parameters) == [
+			"self",
+			"state",
+			"player",
+			"outcome",
+			"ply",
+			"depth",
+		]
 
-		assert isinstance(evaluator, Evaluator)
+	@pytest.mark.parametrize("method", METHODS)
+	def test_outcome_methods_take_the_state_player_ply_and_depth(
+		self,
+		method: str,
+	) -> None:
+		parameters = inspect.signature(getattr(Evaluator, method)).parameters
 
-	def test_base_evaluate_raises_not_implemented_error(self) -> None:
-		evaluator = make_complete_subclass(Evaluator)()
+		assert list(parameters) == ["self", "state", "player", "ply", "depth"]
 
-		with pytest.raises(NotImplementedError):
-			Evaluator.evaluate(evaluator, "state", "player")
+	@pytest.mark.parametrize("outcome, expected", [
+		pytest.param(Outcome.WIN, inf, id="win"),
+		pytest.param(Outcome.LOSS, -inf, id="loss"),
+		pytest.param(Outcome.DRAW, 0.0, id="draw"),
+		pytest.param(None, 0.0, id="non-terminal"),
+	])
+	@pytest.mark.parametrize("ply, depth", [(0, 0), (3, 5), (9, None)])
+	def test_default_values(
+		self,
+		outcome: Outcome | None,
+		expected: float,
+		ply: int,
+		depth: int | None,
+	) -> None:
+		value = Evaluator().evaluate("state", 1, outcome, ply, depth)
+
+		assert value == expected
+		assert isinstance(value, float)
+
+	@pytest.mark.parametrize("method, expected", [
+		pytest.param("evaluate_win", inf, id="win"),
+		pytest.param("evaluate_loss", -inf, id="loss"),
+		pytest.param("evaluate_draw", 0.0, id="draw"),
+		pytest.param("evaluate_non_terminal", 0.0, id="non-terminal"),
+	])
+	def test_default_methods_return_the_default_values(
+		self,
+		method: str,
+		expected: float,
+	) -> None:
+		assert getattr(Evaluator(), method)("state", 1, 2, 3) == expected
+
+	def test_default_win_and_loss_are_zero_sum(self) -> None:
+		evaluator = Evaluator()
+
+		assert evaluator.evaluate("s", 1, Outcome.WIN, 0, 1) == -(
+			evaluator.evaluate("s", 2, Outcome.LOSS, 0, 1)
+		)
+
+	@pytest.mark.parametrize("outcome, label", [
+		pytest.param(Outcome.WIN, "win", id="win"),
+		pytest.param(Outcome.LOSS, "loss", id="loss"),
+		pytest.param(Outcome.DRAW, "draw", id="draw"),
+		pytest.param(None, "non_terminal", id="non-terminal"),
+	])
+	def test_evaluate_dispatches_on_the_outcome(
+		self,
+		outcome: Outcome | None,
+		label: str,
+	) -> None:
+		evaluator = RecordingEvaluator()
+
+		evaluator.evaluate("state", 2, outcome, 4, 6)
+
+		assert evaluator.calls == [(label, "state", 2, 4, 6)]
+
+	def test_evaluate_returns_the_value_of_the_overridden_method(self) -> None:
+		evaluator = RecordingEvaluator()
+
+		assert evaluator.evaluate("s", 1, Outcome.WIN, 0, 1) == 10.0
+		assert evaluator.evaluate("s", 1, Outcome.LOSS, 0, 1) == -10.0
+		assert evaluator.evaluate("s", 1, Outcome.DRAW, 0, 1) == 1.5
+		assert evaluator.evaluate("s", 1, None, 0, 1) == -0.5
+
+	@pytest.mark.parametrize("overridden", METHODS)
+	def test_overriding_one_method_keeps_the_other_defaults(
+		self,
+		overridden: str,
+	) -> None:
+		def override(self, state, player, ply, depth) -> float:
+			return 99.0
+
+		custom = type("Custom", (Evaluator,), {overridden: override})()
+		outcomes = {
+			"evaluate_win": Outcome.WIN,
+			"evaluate_loss": Outcome.LOSS,
+			"evaluate_draw": Outcome.DRAW,
+			"evaluate_non_terminal": None,
+		}
+
+		for method, outcome in outcomes.items():
+			expected = (
+				99.0
+				if method == overridden
+				else getattr(Evaluator(), method)("s", 1, 0, 1)
+			)
+
+			assert custom.evaluate("s", 1, outcome, 0, 1) == expected
+
+	def test_values_may_depend_on_ply_and_depth(self) -> None:
+		class Sooner(Evaluator[str, int]):
+			def evaluate_win(self, state, player, ply, depth) -> float:
+				return 100.0 - ply
+
+			def evaluate_loss(self, state, player, ply, depth) -> float:
+				return -100.0 + ply
+
+			def evaluate_non_terminal(self, state, player, ply, depth) -> float:
+				return float(depth)
+
+		evaluator = Sooner()
+
+		assert evaluator.evaluate("s", 1, Outcome.WIN, 3, 0) == 97.0
+		assert evaluator.evaluate("s", 1, Outcome.LOSS, 3, 0) == -97.0
+		assert evaluator.evaluate("s", 1, None, 3, 4) == 4.0
+
+	def test_state_and_player_reach_the_overridden_methods(self) -> None:
+		class StateValue(Evaluator[dict, str]):
+			def evaluate_non_terminal(self, state, player, ply, depth) -> float:
+				return state["value"] if player == "X" else -state["value"]
+
+		evaluator = StateValue()
+
+		assert evaluator.evaluate({"value": 3.0}, "X", None, 0, 1) == 3.0
+		assert evaluator.evaluate({"value": 3.0}, "O", None, 0, 1) == -3.0
 
 
 class TestMoveOrdering:

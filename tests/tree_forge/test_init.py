@@ -35,6 +35,11 @@ class TestTopLevelPackageExports:
 		for name in package.__all__:
 			assert getattr(tree_forge, name) is getattr(package, name)
 
+	def test_exports_the_outcome_enum(self) -> None:
+		assert tree_forge.Outcome is tree_forge.core.models.Outcome
+		assert "Outcome" in tree_forge.__all__
+		assert "Outcome" in tree_forge.core.__all__
+
 	def test_star_import_exposes_public_api(self) -> None:
 		namespace: dict = {}
 
