@@ -912,7 +912,7 @@ class TestMinimaxStatistics:
 		game = TreeGame(tree, scores)
 
 		with patch(
-			"tree_forge.algorithms.minimax.perf_counter",
+			"tree_forge.algorithms._base.perf_counter",
 			side_effect=[10.0, 12.5],
 		):
 			result = make_search(game).search(game.initial_state())
